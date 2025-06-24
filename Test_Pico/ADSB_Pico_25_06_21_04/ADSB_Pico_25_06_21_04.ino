@@ -70,25 +70,25 @@ void loop()
 {
 
     // Loop forever.
-    decoder.UpdateDecoderLoop();
+   // decoder.UpdateDecoderLoop();
     decoder.UpdateLogLoop();
     comms_manager.Update();
     adsbee.Update();
 
 
 
-  //unsigned long currentMillis = millis();
-  //if (currentMillis - previousMillis >= interval) 
-  //{
-  //  previousMillis = currentMillis;
-  //  if (ledState == LOW) 
-  //  {
-  //    ledState = HIGH;
-  //  }
-  //  else 
-  //  {
-  //    ledState = LOW;
-  //  }
-  //  digitalWrite(ledPin, ledState);
-  //}
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= interval) 
+  {
+    previousMillis = currentMillis;
+    if (ledState == LOW) 
+    {
+      ledState = HIGH;
+    }
+    else 
+    {
+      ledState = LOW;
+    }
+    digitalWrite(ledPin, ledState);
+  }
 }

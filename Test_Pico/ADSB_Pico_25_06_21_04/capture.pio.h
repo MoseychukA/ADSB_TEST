@@ -1,35 +1,34 @@
 //; PIO0
-//; SM0: Well Formed Preamble Detector #1
-//; SM1: Well Formed Preamble Detector #2
-//; SM2: High Power Preamble Detector
-//; SM3: IRQ Wrapper for Well Formed Preamble Detectors (wraps between SM0 and SM1) 
+//; SM0: Детектор хорошо сформированной преамбулы № 1
+//; SM1: Детектор хорошо сформированной преамбулы № 2
+//; SM2: Детектор высокой мощности преамбулы
+//; SM3: Оболочка IRQ для детекторов хорошо сформированной преамбулы (оболочки между SM0 и SM1)
 //
 //; PIO1
-//; SM0: Demodulator for Well Formed Preamble Detector #1
-//; SM1: Demodulator for Well Formed Preamble Detector #2
-//; SM2: Demodulator for High Power Preamble Detector
+//; SM0: Демодулятор для детектора хорошо сформированной преамбулы № 1
+//; SM1: Демодулятор для детектора хорошо сформированной преамбулы № 2
+//; SM2: Демодулятор для детектора высокой мощности преамбулы
 //
 //.program irq_wrapper
 //
-//; This program runs at 48MHz. Each clock cycle is 1/48us.
-//; The only purpose of this program is to wrap an IRQ back to the beginning of the array of state machines.
+//; Эта программа работает на частоте 48 МГц. Каждый тактовый цикл составляет 1/48us.
+//; Единственная цель этой программы — перенести IRQ обратно в начало массива конечных автоматов.
 //
 //.wrap_target
-//wait 1 irq 6 ; Waits for IRQ 6, then clears it. Set this IRQ number equal to 4+num_state_machines.
-//irq set 4 ; Sets IRQ 4 to trigger preamble detector on SM 0 (looping back around).
+//wait 1 irq 6 ; Ожидает IRQ 6, затем очищает его. Устанавливает этот номер IRQ равным 4+num_state_machines.
+//irq set 4 ; Устанавливает IRQ 4 для срабатывания детектора преамбулы на SM 0 (циклически).
 //.wrap
 
 //% c-sdk {
 
-// Helper function (for use in C program) to initialize this PIO program
+// Вспомогательная функция (для использования в программе на языке C) для инициализации этой программы PIO
 void irq_wrapper_program_init(PIO pio, uint sm, uint offset, float div)
 {
-
-    // Sets up state machine and wrap target. This function is automatically
-    // generated in preamble_detector.pio.h.
+    // Устанавливает конечный автомат и обертывает цель. Эта функция автоматически
+    // генерируется в preamble_detector.pio.h.
    //!! pio_sm_config c = irq_wrapper_program_get_default_config(offset);
     
-    // Set the clock divider for the state machine
+ // Устанавливаем делитель часов для конечного автомата
    //!! sm_config_set_clkdiv(&c, div);
 
     // Load configuration and jump to start of the program
@@ -39,47 +38,46 @@ void irq_wrapper_program_init(PIO pio, uint sm, uint offset, float div)
 
 //.program preamble_detector
 //
-//; This program runs at 48MHz. Each clock cycle is 1/48us.
-//
+//; Эта программа работает на частоте 48 МГц. Каждый тактовый цикл составляет 1/48us.
+ 
 //.define pulses_pin_index 0
 //.define demod_pin_index 1
-//
-//
-//; Build preamble pattern and load it into ISR: 0b101000010100000.
-//; Note that one 0 bit has been removed from the preamble to allow more cycles for the demodulator to turn on.
-//; set pins 0 ; DEBUG
-//
-//; BEGIN DOUBLE PULSE MATCH
+ 
+//; Построить шаблон преамбулы и загрузить его в ISR: 0b101000010100000.
+//; Обратите внимание, что один нулевой бит был удален из преамбулы, чтобы обеспечить больше циклов для включения демодулятора.
+//; установить контакты 0 ; ОТЛАДКА
+ 
+//; НАЧАТЬ ДВОЙНОЙ ИМПУЛЬСНЫЙ МАТЧ
 //.wrap_target
 //public waiting_for_first_edge:
 //    irq set 6                       ; -4 | Spam resetting the high power preamble detector.
 //    mov osr isr                     ; -3 | OSR = 0b00000000000000000010100001010000
 //    out null 18                     ; -2 | OSR = 0b10100001010000
 //    mov x null                      ; -1 | Clear out x from last sampling adventure.
-//; Grab a new bit every 24 cycles.
+//;Меняйте сверло каждые 24 цикла.
 //;   6 cycles: Get bit.
 //;   12 cycles: Assert bit.
 //;   6 cycles: nop.
-//    wait 1 pin, pulses_pin_index    ; 0 | wait for in_pin to go HI
-//    irq set 5 rel ; 1 | set IRQ 5+SM to indicate to the other preamble detector that it can start looking now
+//    wait 1 pin, pulses_pin_index    ; 0 | ждать, пока in_pin перейдет в режим HI
+//    irq set 5 rel ; 1 | установить IRQ 5+SM, чтобы указать другому детектору преамбулы, что он может начать поиск сейчас
 //check_next_bit:
 //    jmp !osre preamble_not_done_yet ; 2 
 //; .wrap_target
 //preamble_matched:
-//    set pins 1 [2] ; 3:5 | set demod pin to indicate message body beginning
-//    wait 1 pin, pulses_pin_index [11] ; 6:17 | wait till middle of message eye to look for end
+//    set pins 1 [2] ;3:5 | установить демодуляционный вывод для указания начала тела сообщения
+//    wait 1 pin, pulses_pin_index [11] ;6:17 | дождитесь середины сообщения, чтобы увидеть конец
 //waiting_for_end_of_message:
-//    set x, 16 [2] ; 18:20 | [2.0us] number of sequential idle samples required to mark end of packet
+//    set x, 16 [2] ;18:20 | [2.0us] количество последовательных выборок бездействия, необходимых для обозначения конца пакета
 //idle_countdown:
-//    jmp pin waiting_for_end_of_message [2] ; 21+2n:24+2n | start over the idle countdown if received a non idle bit
-//    jmp x-- idle_countdown [2] ; 25+2n:28+2n | still idle, keep counting down if the timer isn't up
+//    jmp pin waiting_for_end_of_message [2] ; 21+2n:24+2n | начать заново обратный отсчет простоя, если получен не пустой бит
+//    jmp x-- idle_countdown [2] ; 25+2n:28+2n | все еще бездействует, продолжайте отсчет, если таймер не вышел
 //message_finished:
-//    set pins, 0 ; 29+2n | set demod pin to 0 to indicate message is finished
-//    ; irq set 0 [1] ; 30+2n:31+2n | set the DEMOD IRQ to indicate the message body is finished
-//    irq wait 0 rel ; 30+2n | Set IRQ 0+SM, and wait for it to clear (don't look for new messages until the current one has been processed).
+//    set pins, 0 ; 29+2n | установить вывод демодулятора на 0, чтобы указать, что сообщение завершено
+//    ; irq set 0 [1] ;30+2n:31+2n | установить DEMOD IRQ, чтобы указать, что тело сообщения завершено
+//    irq wait 0 rel ; 30+2n | Установить IRQ 0+SM и дождаться его очистки (не ищите новые сообщения, пока текущее не будет обработано).
 //public follow_irq:
-//    wait 1 irq 4 rel ; Wait for IRQ 4+SM, then clear it.
-//    wait 0 pin, pulses_pin_index ; Wait for line to go LO so that we don't double with the detector that's already running.
+//    wait 1 irq 4 rel ;Дождитесь IRQ 4+SM, затем очистите его.
+//    wait 0 pin, pulses_pin_index ;Подождите, пока линия не перейдет в режим LO, чтобы не дублировать уже работающий детектор.
 //
 //.wrap
 //
@@ -115,9 +113,9 @@ void irq_wrapper_program_init(PIO pio, uint sm, uint offset, float div)
 //;     jmp waiting_for_first_edge  ; Correlation failed.
 //    
 //filter_pin_lo:
-//    ; Generous implementation that accepts a single LO sample anywhere in the sampling window as a success.
-//    ; This accounts for the asymmetric nature of the data slicer circuit as it is charging up during the preamble; it
-//    ; is a lot harder to get a LO sample than a HI sample from an incoming message.
+// ; Щедрая реализация, которая принимает один образец LO в любом месте окна выборки как успех.
+// ; Это объясняет асимметричную природу схемы среза данных, поскольку она заряжается во время преамбулы
+// ; получить образец LO из входящего сообщения гораздо сложнее, чем образец HI.
 //    set x 5 [2] ; 6-8: Number of samples = x+1.
 //fpl_wrap_target:
 //    jmp pin fpl_pin_hi ; 9+2n

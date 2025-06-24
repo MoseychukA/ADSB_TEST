@@ -106,7 +106,8 @@ uint16_t Raw1090Packet::PrintBuffer(char *buf, uint16_t buf_len_bytes) const {
 Decoded1090Packet::Decoded1090Packet(uint32_t rx_buffer[kMaxPacketLenWords32], uint16_t rx_buffer_len_words32,
                                      int16_t source, int32_t sigs_dbm, int32_t sigq_db,
                                      uint64_t mlat_48mhz_64bit_counts)
-    : raw_(rx_buffer, rx_buffer_len_words32, source, sigs_dbm, sigq_db, mlat_48mhz_64bit_counts) {
+    : raw_(rx_buffer, rx_buffer_len_words32, source, sigs_dbm, sigq_db, mlat_48mhz_64bit_counts) 
+{
     ConstructTransponderPacket();
 }
 
@@ -211,7 +212,8 @@ uint32_t Decoded1090Packet::CalculateCRC24(uint16_t packet_len_bits) const {
 #endif
 }
 
-void Decoded1090Packet::ConstructTransponderPacket() {
+void Decoded1090Packet::ConstructTransponderPacket() 
+{
     if (raw_.buffer_len_bits != Raw1090Packet::kExtendedSquitterPacketLenBits &&
         raw_.buffer_len_bits != Raw1090Packet::kSquitterPacketLenBits) {
         snprintf(
@@ -225,7 +227,8 @@ void Decoded1090Packet::ConstructTransponderPacket() {
     uint32_t calculated_checksum = CalculateCRC24(raw_.buffer_len_bits);
     uint32_t parity_value = Get24BitWordFromBuffer(raw_.buffer_len_bits - BITS_PER_WORD_24, raw_.buffer);
 
-    switch (static_cast<DownlinkFormat>(downlink_format_)) {
+    switch (static_cast<DownlinkFormat>(downlink_format_)) 
+    {
         case kDownlinkFormatShortRangeAirToAirSurveillance:  // DF = 0
         case kDownlinkFormatAltitudeReply:                   // DF = 4
         case kDownlinkFormatIdentityReply:                   // DF = 5
@@ -254,7 +257,8 @@ void Decoded1090Packet::ConstructTransponderPacket() {
         {
             // Process a 112-bit message.
             icao_address_ = raw_.buffer[0] & 0xFFFFFF;
-            if (calculated_checksum == parity_value) {
+            if (calculated_checksum == parity_value) 
+            {
                 is_valid_ = true;  // mark packet as valid if CRC matches the parity bits
             } else {
                 // is_valid_ is set to false by default
@@ -270,7 +274,8 @@ void Decoded1090Packet::ConstructTransponderPacket() {
 /**
  * Helper function used by constructors.
  */
-void ADSBPacket::ConstructADSBPacket() {
+void ADSBPacket::ConstructADSBPacket() 
+{
     capability_ = static_cast<ADSBPacket::Capability>((raw_.buffer[0] >> 24) & 0b111);
     typecode_ = static_cast<ADSBPacket::TypeCode>(raw_.buffer[1] >> 27);
     parity_interrogator_id = raw_.buffer[1] & 0xFFFFFF;
@@ -278,7 +283,8 @@ void ADSBPacket::ConstructADSBPacket() {
 
 ADSBPacket::TypeCode ADSBPacket::GetTypeCodeEnum() const {
     // Table 3.3 from The 1090Mhz Riddle (Junzi Sun), pg. 37.
-    switch (static_cast<uint16_t>(typecode_)) {
+    switch (static_cast<uint16_t>(typecode_)) 
+    {
         case 1:
         case 2:
         case 3:
@@ -332,9 +338,11 @@ ADSBPacket::TypeCode ADSBPacket::GetTypeCodeEnum() const {
     }
 }
 
-AltitudeReplyPacket::AltitudeReplyPacket(const Decoded1090Packet &decoded_packet) : Decoded1090Packet(decoded_packet) {
+AltitudeReplyPacket::AltitudeReplyPacket(const Decoded1090Packet &decoded_packet) : Decoded1090Packet(decoded_packet) 
+{
     uint8_t flight_status = GetNBitWordFromBuffer(3, 5, raw_.buffer);  // FS = Bits 5-7.
-    switch (flight_status) {
+    switch (flight_status) 
+    {
         case 0b000:  // No alert, no SPI, aircraft is airborne.
             has_alert_ = false;
             has_ident_ = false;
@@ -378,7 +386,8 @@ AltitudeReplyPacket::AltitudeReplyPacket(const Decoded1090Packet &decoded_packet
     //!!altitude_ft_ = AltitudeCodeToAltitudeFt(GetNBitWordFromBuffer(13, 19, raw_.buffer));
 };
 
-IdentityReplyPacket::IdentityReplyPacket(const Decoded1090Packet &decoded_packet) : Decoded1090Packet(decoded_packet) {
+IdentityReplyPacket::IdentityReplyPacket(const Decoded1090Packet &decoded_packet) : Decoded1090Packet(decoded_packet) 
+{
     uint8_t flight_status = GetNBitWordFromBuffer(3, 5, raw_.buffer);  // FS = Bits 5-7.
     switch (flight_status) {
         case 0b000:  // No alert, no SPI, aircraft is airborne.

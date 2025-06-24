@@ -34,8 +34,8 @@ bool PacketDecoder::UpdateLogLoop()
 
 bool PacketDecoder::UpdateDecoderLoop() 
 {
-    uint16_t num_packets_to_process = raw_1090_packet_in_queue.Length();
-    if (num_packets_to_process == 0) 
+    uint16_t num_packets_to_process = raw_1090_packet_in_queue.Length(); // Проверить, были пакеты или нет
+    if (num_packets_to_process == 0)                                     // Пакетов нет
     {
         return true;  // Nothing to do.
     }

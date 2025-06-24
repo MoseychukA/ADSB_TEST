@@ -1,5 +1,6 @@
 #include "adsbee.h"
 
+#include "Arduino.h"
 #include <hardware/structs/systick.h>
 
 #include "hardware/adc.h"
@@ -17,6 +18,8 @@
 #include "hardware/irq.h"
 #include "packet_decoder.h"
 #include "pico/binary_info.h"
+#include <FreeRTOS.h>
+#include <_freertos.h>
 
 // #include <charconv>
 #include <string.h>  // for strcat
@@ -33,7 +36,7 @@ constexpr float kInt16MaxRecip = 1.0f / INT16_MAX;
 
 ADSBee *isr_access = nullptr;
 
-/** Begin pass-through functions for public access **/
+/** Запуск сквозных функций для публичного доступа **/
 void on_systick_exception() { isr_access->OnSysTickWrap(); }
 
 void on_demod_pin_change(uint gpio, uint32_t event_mask) 
@@ -125,15 +128,21 @@ bool ADSBee::Init()
 
     //===================================================================================
 
-
     // Включить таймер MLAT с помощью 24-битного таймера SysTick, подключенного к тактовой частоте процессора 125 МГц.
     // Регистр управления и состояния SysTick
-    systick_hw->csr = 0b110;  // Source = Processor Clock, TickInt = Enabled, Counter = Disabled.
-    // SysTick Reload Value Register
-    systick_hw->rvr = 0xFFFFFF;  // Use the full 24 bit span of the timer value register.
+    systick_hw->csr = 0b110;  // Источник = Частота процессора, TickInt = Включено, Счетчик = Отключено.
+    // Регистр перезагрузки значения SysTick
+    systick_hw->rvr = 0xFFFFFF;  // Используйте полный 24-битный диапазон регистра значения таймера.
     // 0xFFFFFF = 16777215 отсчетов @ 125 МГц = примерно 0,134 секунды.
+    if (!(__isFreeRTOS))
+    {
+        // Включить исключение SYSTICK
+        exception_set_exclusive_handler(SYSTICK_EXCEPTION, on_systick_exception);
+        systick_hw->csr = 0x7;
+        systick_hw->rvr = 0x00FFFFFF;
+    }
     // Вызвать функцию OnSysTickWrap каждый раз, когда таймер SysTick достигает 0.
-    //!! exception_set_exclusive_handler(SYSTICK_EXCEPTION, on_systick_exception);  //Уточнить что нужно
+    // exception_set_exclusive_handler(/*PENDSV_EXCEPTION*//*SVCALL_EXCEPTION*/SYSTICK_EXCEPTION, on_systick_exception);  //Уточнить что нужно
     // Да начнутся игры!
     systick_hw->csr |= 0b1;  // Включить счетчик.
 
@@ -208,7 +217,8 @@ bool ADSBee::Init()
 
     /** MESSAGE DEMODULATOR PIO **/
     float message_demodulator_div = (float)clock_get_hz(clk_sys) / kMessageDemodulatorFreq;
-    for (uint16_t sm_index = 0; sm_index < bsp.r1090_num_demod_state_machines; sm_index++) {
+    for (uint16_t sm_index = 0; sm_index < bsp.r1090_num_demod_state_machines; sm_index++) 
+    {
         message_demodulator_program_init(config_.message_demodulator_pio, message_demodulator_sm_[sm_index],
                                          message_demodulator_offset_, config_.pulses_pins[sm_index],
                                          config_.demod_pins[sm_index], config_.recovered_clk_pins[sm_index],
