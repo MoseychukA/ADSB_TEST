@@ -1,0 +1,42 @@
+*.o
+dump1090
+testfiles/*.bin
+misc
+frames.js
+.*.swp
+*~
+*.rej
+*.orig
+untrackedDeveloperSettings.js
+view1090
+faup1090
+
+#Visual Studio from: https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
+## User-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+## User-specific files (MonoDevelop/Xamarin Studio)
+*.userprefs
+
+## Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+build/
+bld/
+[Bb]in/
+[Oo]bj/
+
+## Visual C++ cache files
+ipch/
+*.aps
+*.ncb
+*.opensdf
+*.sdf
+*.cachefile

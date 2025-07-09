@@ -1,0 +1,29 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio 2010
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dump1090", "dump1090.vcxproj", "{BE63D02A-C284-8D63-52A2-A5FF5AF292BD}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "view1090", "view1090.vcxproj", "{70065ED2-8338-DFFE-CB59-104662C18E6C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+		Template|Win32 = Template|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{BE63D02A-C284-8D63-52A2-A5FF5AF292BD}.Debug|Win32.ActiveCfg = Debug|Win32
+		{BE63D02A-C284-8D63-52A2-A5FF5AF292BD}.Debug|Win32.Build.0 = Debug|Win32
+		{BE63D02A-C284-8D63-52A2-A5FF5AF292BD}.Release|Win32.ActiveCfg = Release|Win32
+		{BE63D02A-C284-8D63-52A2-A5FF5AF292BD}.Release|Win32.Build.0 = Release|Win32
+		{BE63D02A-C284-8D63-52A2-A5FF5AF292BD}.Template|Win32.ActiveCfg = Release|Win32
+		{BE63D02A-C284-8D63-52A2-A5FF5AF292BD}.Template|Win32.Build.0 = Release|Win32
+		{70065ED2-8338-DFFE-CB59-104662C18E6C}.Debug|Win32.ActiveCfg = Debug|Win32
+		{70065ED2-8338-DFFE-CB59-104662C18E6C}.Release|Win32.ActiveCfg = Release|Win32
+		{70065ED2-8338-DFFE-CB59-104662C18E6C}.Template|Win32.ActiveCfg = Template|Win32
+		{70065ED2-8338-DFFE-CB59-104662C18E6C}.Template|Win32.Build.0 = Template|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

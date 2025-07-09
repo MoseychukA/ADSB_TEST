@@ -1,0 +1,159 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{f1dd9786-e82c-48b5-9328-bbd595057e9f}</UniqueIdentifier>
+      <Extensions>cpp;c;cxx;rc;def;r;odl;idl;hpj;bat</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{dc0285b2-b848-4684-bb82-b11a7cac75c9}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{4f62f1d8-d950-4e2e-990f-437ff1c970a8}</UniqueIdentifier>
+      <Extensions>ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe</Extensions>
+    </Filter>
+    <Filter Include="Library Files">
+      <UniqueIdentifier>{b1ef7848-7ea8-454e-8a90-d65a89aa2717}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="anet.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="dump1090.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="interactive.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mode_ac.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mode_s.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="net_io.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="convert.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cpr.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="crc.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="demod_2000.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="demod_2400.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="icao_filter.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="stats.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="track.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="util.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="anet.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="dump1090.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="winstubs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="convert.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cpr.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="crc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="demod_2000.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="demod_2400.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="icao_filter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="net_io.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="stats.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="track.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="util.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="endian\endian.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inttypes\inttypes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inttypes\stdint.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="libpthread\semaphore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rtlsdr\rtl-sdr.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rtlsdr\rtl-sdr_export.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pthread\pthread.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="winposixclock\winposixclock.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Dump1090.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Library Include="rtlsdr\rtlsdr.lib">
+      <Filter>Library Files</Filter>
+    </Library>
+    <Library Include="pthread\pthreadVC2.lib">
+      <Filter>Library Files</Filter>
+    </Library>
+    <Library Include="rtlsdr\rtlsdr_static.lib">
+      <Filter>Library Files</Filter>
+    </Library>
+    <Library Include="winposixclock\winposixclock.lib">
+      <Filter>Library Files</Filter>
+    </Library>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="rtlsdr\rtlsdr.dll">
+      <Filter>Library Files</Filter>
+    </None>
+  </ItemGroup>
+</Project>

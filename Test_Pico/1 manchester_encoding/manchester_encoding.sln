@@ -1,0 +1,35 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.36107.64
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "manchester_encoding", "manchester_encoding.vcxproj", "{21DB15DD-96DE-4603-A3CE-30A8633CD104}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|ARM = Debug|ARM
+		Debug|ARM64 = Debug|ARM64
+		Release|ARM = Release|ARM
+		Release|ARM64 = Release|ARM64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Debug|ARM.ActiveCfg = Debug|ARM
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Debug|ARM.Build.0 = Debug|ARM
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Debug|ARM.Deploy.0 = Debug|ARM
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Debug|ARM64.ActiveCfg = Debug|ARM64
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Debug|ARM64.Build.0 = Debug|ARM64
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Debug|ARM64.Deploy.0 = Debug|ARM64
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Release|ARM.ActiveCfg = Release|ARM
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Release|ARM.Build.0 = Release|ARM
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Release|ARM.Deploy.0 = Release|ARM
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Release|ARM64.ActiveCfg = Release|ARM64
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Release|ARM64.Build.0 = Release|ARM64
+		{21DB15DD-96DE-4603-A3CE-30A8633CD104}.Release|ARM64.Deploy.0 = Release|ARM64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {46C83C8E-771E-4E50-BDC7-8381040DA826}
+	EndGlobalSection
+EndGlobal

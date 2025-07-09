@@ -1,0 +1,35 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.36107.64
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CapacitiveSensing", "CapacitiveSensing.vcxproj", "{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|ARM = Debug|ARM
+		Debug|ARM64 = Debug|ARM64
+		Release|ARM = Release|ARM
+		Release|ARM64 = Release|ARM64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Debug|ARM.ActiveCfg = Debug|ARM
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Debug|ARM.Build.0 = Debug|ARM
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Debug|ARM.Deploy.0 = Debug|ARM
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Debug|ARM64.ActiveCfg = Debug|ARM64
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Debug|ARM64.Build.0 = Debug|ARM64
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Debug|ARM64.Deploy.0 = Debug|ARM64
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Release|ARM.ActiveCfg = Release|ARM
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Release|ARM.Build.0 = Release|ARM
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Release|ARM.Deploy.0 = Release|ARM
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Release|ARM64.ActiveCfg = Release|ARM64
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Release|ARM64.Build.0 = Release|ARM64
+		{37143644-8E3F-4BF8-8CE5-8CE2A7158CDA}.Release|ARM64.Deploy.0 = Release|ARM64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {FC1FE976-E89B-455E-858E-DF0C3FA6CAFC}
+	EndGlobalSection
+EndGlobal

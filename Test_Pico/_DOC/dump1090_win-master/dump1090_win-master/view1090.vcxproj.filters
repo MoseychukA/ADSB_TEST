@@ -1,0 +1,113 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{43954c28-05c5-41c5-b280-97b15026b343}</UniqueIdentifier>
+      <Extensions>cpp;c;cxx;rc;def;r;odl;idl;hpj;bat</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{074f09a7-d535-4c92-a34a-b9a3b79b7c60}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl</Extensions>
+    </Filter>
+    <Filter Include="Library Files">
+      <UniqueIdentifier>{ec3f3c0f-f2da-4a9f-b057-e627176b4902}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{7ba00c0a-2177-4d22-b8f3-574ca94a637d}</UniqueIdentifier>
+      <Extensions>ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="anet.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="interactive.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mode_ac.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mode_s.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="net_io.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="view1090.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="crc.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="icao_filter.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="stats.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="track.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cpr.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="util.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="dump1090.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="view1090.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="winstubs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pthread\pthread.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="endian\endian.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inttypes\inttypes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="net_io.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="crc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="icao_filter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="stats.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="track.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cpr.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="util.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="winposixclock\winposixclock.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Library Include="rtlsdr\rtlsdr.lib">
+      <Filter>Library Files</Filter>
+    </Library>
+    <Library Include="pthread\pthreadVC2.lib">
+      <Filter>Library Files</Filter>
+    </Library>
+    <Library Include="winposixclock\winposixclock.lib">
+      <Filter>Library Files</Filter>
+    </Library>
+  </ItemGroup>
+</Project>

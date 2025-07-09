@@ -1,0 +1,186 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <SccProjectName />
+    <SccLocalPath />
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseOfMfc>false</UseOfMfc>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseOfMfc>false</UseOfMfc>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(VCTargetsPath)Microsoft.Cpp.UpgradeFromVC60.props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(VCTargetsPath)Microsoft.Cpp.UpgradeFromVC60.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <OutDir>.\Release\</OutDir>
+    <IntDir>.\Release\</IntDir>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <OutDir>.\Debug\</OutDir>
+    <IntDir>.\Debug\</IntDir>
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <StringPooling>true</StringPooling>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <Optimization>Full</Optimization>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <WarningLevel>Level3</WarningLevel>
+      <AdditionalIncludeDirectories>.\winposixclock\.;.\endian\.;.\inttypes\.;.\rtlsdr\.;.\pthread\.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AssemblerListingLocation>.\Release\</AssemblerListingLocation>
+      <BrowseInformation>true</BrowseInformation>
+      <PrecompiledHeaderOutputFile>.\Release\dump1090.pch</PrecompiledHeaderOutputFile>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <ObjectFileName>.\Release\</ObjectFileName>
+      <ProgramDataBaseFileName>.\Release\</ProgramDataBaseFileName>
+      <DisableSpecificWarnings>4996;4005;4244</DisableSpecificWarnings>
+    </ClCompile>
+    <Midl>
+      <TypeLibraryName>.\Release\dump1090.tlb</TypeLibraryName>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0809</Culture>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Bscmake>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <OutputFile>.\Release\dump1090.bsc</OutputFile>
+    </Bscmake>
+    <Link>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <SubSystem>Console</SubSystem>
+      <OutputFile>./release/dump1090.exe</OutputFile>
+      <AdditionalDependencies>ws2_32.lib;.\winposixclock\winposixclock.lib;.\pthread\pthreadVC2.lib;.\rtlsdr\rtlsdr_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <FunctionLevelLinking>false</FunctionLevelLinking>
+      <Optimization>Disabled</Optimization>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <WarningLevel>Level3</WarningLevel>
+      <MinimalRebuild>true</MinimalRebuild>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <AdditionalIncludeDirectories>.\winposixclock\.;.\endian\.;.\inttypes\.;.\rtlsdr\.;.\pthread\.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AssemblerListingLocation>.\Debug\</AssemblerListingLocation>
+      <BrowseInformation>true</BrowseInformation>
+      <PrecompiledHeaderOutputFile>.\Debug\dump1090.pch</PrecompiledHeaderOutputFile>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <ObjectFileName>.\Debug\</ObjectFileName>
+      <ProgramDataBaseFileName>.\Debug\</ProgramDataBaseFileName>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <DisableSpecificWarnings>4996;4005;4244</DisableSpecificWarnings>
+    </ClCompile>
+    <Midl>
+      <TypeLibraryName>.\Debug\dump1090.tlb</TypeLibraryName>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0809</Culture>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Bscmake>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <OutputFile>.\Debug\dump1090.bsc</OutputFile>
+    </Bscmake>
+    <Link>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+      <OutputFile>.\Debug\dump1090.exe</OutputFile>
+      <AdditionalDependencies>ws2_32.lib;.\winposixclock\winposixclock.lib;.\pthread\pthreadVC2.lib;.\rtlsdr\rtlsdr_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="anet.c" />
+    <ClCompile Include="convert.c" />
+    <ClCompile Include="cpr.c" />
+    <ClCompile Include="crc.c" />
+    <ClCompile Include="demod_2000.c" />
+    <ClCompile Include="demod_2400.c" />
+    <ClCompile Include="dump1090.c" />
+    <ClCompile Include="icao_filter.c" />
+    <ClCompile Include="interactive.c" />
+    <ClCompile Include="mode_ac.c" />
+    <ClCompile Include="mode_s.c" />
+    <ClCompile Include="net_io.c" />
+    <ClCompile Include="stats.c" />
+    <ClCompile Include="track.c" />
+    <ClCompile Include="util.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="anet.h" />
+    <ClInclude Include="convert.h" />
+    <ClInclude Include="cpr.h" />
+    <ClInclude Include="crc.h" />
+    <ClInclude Include="demod_2000.h" />
+    <ClInclude Include="demod_2400.h" />
+    <ClInclude Include="dump1090.h" />
+    <ClInclude Include="endian\endian.h" />
+    <ClInclude Include="icao_filter.h" />
+    <ClInclude Include="inttypes\inttypes.h" />
+    <ClInclude Include="inttypes\stdint.h" />
+    <ClInclude Include="libpthread\semaphore.h" />
+    <ClInclude Include="net_io.h" />
+    <ClInclude Include="pthread\pthread.h" />
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="rtlsdr\rtl-sdr.h" />
+    <ClInclude Include="rtlsdr\rtl-sdr_export.h" />
+    <ClInclude Include="stats.h" />
+    <ClInclude Include="track.h" />
+    <ClInclude Include="util.h" />
+    <ClInclude Include="winposixclock\winposixclock.h" />
+    <ClInclude Include="winstubs.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Dump1090.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Library Include="pthread\pthreadVC2.lib" />
+    <Library Include="rtlsdr\rtlsdr.lib" />
+    <Library Include="rtlsdr\rtlsdr_static.lib" />
+    <Library Include="winposixclock\winposixclock.lib" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="rtlsdr\rtlsdr.dll" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
