@@ -1,0 +1,157 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ADSB_Pico_25_07_10_01.ino" />
+    <ClCompile Include="adsbee.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="adsbee.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="aircraft_dictionary.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="aircraft_dictionary.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="awb_utils.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="beast_tables.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="beast_utils.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="bsp.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="buffer_utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="buffer_utils.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="capture_pio.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="comms.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="comms.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="comms_reporting.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="crc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="crc.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="crc_tables.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="csbee_utils.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="data_structures.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="data_structures.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="decode_utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="decode_utils.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="geo_tables.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="geo_utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="geo_utils.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="hal.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="hal.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="hal_god_powers.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="json_utils.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="macros.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="nasa_cpr.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="nasa_cpr_airborne.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="object_dictionary.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="object_dictionary.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="packet_decoder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="packet_decoder.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="raw_utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="raw_utils.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="settings.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="settings.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="settings_strs.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="transponder_packet.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="transponder_packet.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="unit_conversions.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="__vm\.ADSB_Pico_25_07_10_01.vsarduino.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

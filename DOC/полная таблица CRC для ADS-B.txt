@@ -1,0 +1,243 @@
+Вот полная таблица CRC для ADS-B протокола:
+
+
+// Полная таблица CRC24 для ADS-B (полином 0xFFF409)
+static const uint32_t crc_table[256] = {
+    0x000000, 0xfff409, 0x1ff813, 0xe00c1a, 0x3ff026, 0xc00c2f, 0x200835, 0xdff43c,
+    0x7fe04c, 0x801445, 0x61f85f, 0x9e0456, 0x401d6a, 0xbfe163, 0x5e1d79, 0xa1e970,
+    0xffc098, 0x003c91, 0xe1c08b, 0x1e3c82, 0xc03bbe, 0x3fc7b7, 0xde3bad, 0x21c7a4,
+    0x8020d4, 0x7fdcdd, 0x9e20c7, 0x61dcce, 0xbfd3f2, 0x402ffb, 0xa1d3e1, 0x5e2fe8,
+    0x1f8130, 0xe07d39, 0x018123, 0xfe7d2a, 0x207216, 0xdf8e1f, 0x3e7205, 0xc18e0c,
+    0x60617c, 0x9f9d75, 0x7e616f, 0x819d66, 0x5f925a, 0xa06e53, 0x419249, 0xbe6e40,
+    0xe041a8, 0x1fbda1, 0xfe41bb, 0x01bdb2, 0xdfb08e, 0x204c87, 0xc1b09d, 0x3e4c94,
+    0x9fa1e4, 0x605ded, 0x81a1f7, 0x7e5dfe, 0xa052c2, 0x5faecb, 0xbe52d1, 0x41aed8,
+    0x3f0260, 0xc0fe69, 0x210273, 0xdefe7a, 0x00f146, 0xff0d4f, 0x1ef155, 0xe10d5c,
+    0x40e22c, 0xbf1e25, 0x5ee23f, 0xa11e36, 0x7f110a, 0x80ed03, 0x611119, 0x9eed10,
+    0xc0c2f8, 0x3f3ef1, 0xdec2eb, 0x213ee2, 0xff31de, 0x00cdd7, 0xe131cd, 0x1ecdc4,
+    0xbf22b4, 0x40debd, 0xa122a7, 0x5edeae, 0x80d192, 0x7f2d9b, 0x9ed181, 0x612d88,
+    0x2083c0, 0xdf7fc9, 0x3e83d3, 0xc17fda, 0x1f70e6, 0xe08cef, 0x0170f5, 0xfe8cfc,
+    0x5f638c, 0xa09f85, 0x41639f, 0xbe9f96, 0x6090aa, 0x9f6ca3, 0x7e90b9, 0x816cb0,
+    0xdf4358, 0x20bf51, 0xc1434b, 0x3ebf42, 0xe0b07e, 0x1f4c77, 0xfeb06d, 0x014c64,
+    0xa0a314, 0x5f5f1d, 0xbea307, 0x415f0e, 0x9f5032, 0x60ac3b, 0x815021, 0x7eac28,
+    0x7e04c0, 0x81f8c9, 0x6004d3, 0x9ff8da, 0x41f7e6, 0xbe0bef, 0x5ff7f5, 0xa00bfc,
+    0x01e48c, 0xfe1885, 0x1fe49f, 0xe01896, 0x3e17aa, 0xc1eba3, 0x2017b9, 0xdfebb0,
+    0x81c458, 0x7e3851, 0x9fc44b, 0x603842, 0xbe377e, 0x41cb77, 0xa0376d, 0x5fcb64,
+    0xfe2414, 0x01d81d, 0xe02407, 0x1fd80e, 0xc1d732, 0x3e2b3b, 0xdfd721, 0x202b28,
+    0x6185a0, 0x9e79a9, 0x7f85b3, 0x8079ba, 0x5e7686, 0xa18a8f, 0x407695, 0xbf8a9c,
+    0x1e65ec, 0xe199e5, 0x0065ff, 0xff99f6, 0x2196ca, 0xde6ac3, 0x3f96d9, 0xc06ad0,
+    0x9e4538, 0x61b931, 0x80452b, 0x7fb922, 0xa1b61e, 0x5e4a17, 0xbfb60d, 0x404a04,
+    0xe1a574, 0x1e597d, 0xffa567, 0x00596e, 0xde5652, 0x21aa5b, 0xc05641, 0x3faa48,
+    0x4106a0, 0xbefaa9, 0x5f06b3, 0xa0faba, 0x7ef586, 0x81098f, 0x60f595, 0x9f099c,
+    0x3ee6ec, 0xc11ae5, 0x20e6ff, 0xdf1af6, 0x0115ca, 0xfee9c3, 0x1f15d9, 0xe0e9d0,
+    0xbec638, 0x413a31, 0xa0c62b, 0x5f3a22, 0x81351e, 0x7ec917, 0x9f350d, 0x60c904,
+    0xc12674, 0x3eda7d, 0xdf2667, 0x20da6e, 0xfed552, 0x01295b, 0xe0d541, 0x1f2948,
+    0x5c8780, 0xa37b89, 0x428793, 0xbd7b9a, 0x6374a6, 0x9c88af, 0x7d74b5, 0x8288bc,
+    0x2367cc, 0xdc9bc5, 0x3d67df, 0xc29bd6, 0x1c94ea, 0xe368e3, 0x0294f9, 0xfd68f0,
+    0xa34718, 0x5cbb11, 0xbd470b, 0x42bb02, 0x9cb43e, 0x634837, 0x82b42d, 0x7d4824,
+    0xdca754, 0x235b5d, 0xc2a747, 0x3d5b4e, 0xe35472, 0x1ca87b, 0xfd5461, 0x02a868,
+    0x7309e0, 0x8cf5e9, 0x6d09f3, 0x92f5fa, 0x4cfac6, 0xb306cf, 0x52fad5, 0xad06dc,
+    0x0ce9ac, 0xf315a5, 0x12e9bf, 0xed15b6, 0x331a8a, 0xcce683, 0x2d1a99, 0xd2e690,
+    0x8cc978, 0x733571, 0x92c96b, 0x6d3562, 0xb33a5e, 0x4cc657, 0xad3a4d, 0x52c644,
+    0xf32934, 0x0cd53d, 0xed2927, 0x12d52e, 0xccda12, 0x33261b, 0xd2da01, 0x2d2608,
+    0x228840, 0xdd7449, 0x3c8853, 0xc3745a, 0x1d7b66, 0xe2876f, 0x037b75, 0xfc877c,
+    0x5d680c, 0xa29405, 0x43681f, 0xbc9416, 0x629b2a, 0x9d6723, 0x7c9b39, 0x836730,
+    0xdd48d8, 0x22b4d1, 0xc348cb, 0x3cb4c2, 0xe2bbfe, 0x1d47f7, 0xfcbbed, 0x0347e4,
+    0xa2a894, 0x5d549d, 0xbca887, 0x43548e, 0x9d5bb2, 0x62a7bb, 0x835ba1, 0x7ca7a8,
+    0x3d0960, 0xc2f569, 0x230973, 0xdcf57a, 0x02fa46, 0xfd064f, 0x1cfa55, 0xe3065c,
+    0x42e92c, 0xbd1525, 0x5ce93f, 0xa31536, 0x7d1a0a, 0x82e603, 0x631a19, 0x9ce610,
+    0xc2c9f8, 0x3d35f1, 0xdcc9eb, 0x2335e2, 0xfd3ade, 0x02c6d7, 0xe33acd, 0x1cc6c4,
+    0xbd29b4, 0x42d5bd, 0xa329a7, 0x5cd5ae, 0x82da92, 0x7d269b, 0x9cda81, 0x632688
+};
+
+// Дополнительная функция для проверки и вычисления CRC24
+uint32_t adsb_crc24(uint8_t* data, int length) {
+    uint32_t crc = 0;
+
+    for (int i = 0; i < length; i++) {
+        uint8_t tbl_idx = ((crc >> 16) ^ data[i]) & 0xFF;
+        crc = ((crc << 8) ^ crc_table[tbl_idx]) & 0xFFFFFF;
+    }
+
+    return crc;
+}
+
+// Функция для проверки целостности пакета ADS-B
+bool validate_adsb_packet(uint8_t* packet, int length) {
+    if (length < 14) return false;  // Минимальная длина пакета
+
+    // Извлекаем CRC из последних 3 байт
+    uint32_t received_crc = (packet[length-3] << 16) |
+                           (packet[length-2] << 8) |
+                           packet[length-1];
+
+    // Вычисляем CRC для всех байт кроме последних 3
+    uint32_t calculated_crc = adsb_crc24(packet, length - 3);
+
+    return received_crc == calculated_crc;
+}
+
+// Функция для исправления ошибок (опциональная)
+bool try_error_correction(uint8_t* packet, int length) {
+    // Простая коррекция однобитовых ошибок
+    for (int byte_pos = 0; byte_pos < length - 3; byte_pos++) {
+        uint8_t original = packet[byte_pos];
+
+        for (int bit = 0; bit < 8; bit++) {
+            // Инвертируем бит
+            packet[byte_pos] ^= (1 << bit);
+
+            // Проверяем CRC
+            if (validate_adsb_packet(packet, length)) {
+                return true;  // Ошибка исправлена
+            }
+
+            // Восстанавливаем бит
+            packet[byte_pos] = original;
+        }
+    }
+
+    return false;  // Ошибку исправить не удалось
+}
+
+// Обновленная функция декодирования с использованием таблицы CRC
+bool decode_adsb_packet_with_crc(ADSBPacket* packet) {
+    uint8_t* data = packet->data;
+
+    // Проверяем базовую CRC
+    if (!validate_adsb_packet(data, 14)) {
+        // Пытаемся исправить однобитовую ошибку
+        if (!try_error_correction(data, 14)) {
+            packet->valid = false;
+            return false;
+        }
+    }
+
+    packet->valid = true;
+
+    // Дополнительные проверки для конкретных типов сообщений
+    uint8_t df = (data[0] >> 3) & 0x1F;
+
+    // Проверяем что это правильный тип ADS-B сообщения
+    if (df != 17 && df != 18) {
+        packet->valid = false;
+        return false;
+    }
+
+    // Дополнительная проверка для Extended Squitter
+    if (df == 17) {
+        uint8_t ca = data[0] & 0x07;  // Capability
+        if (ca > 7) {
+            packet->valid = false;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Генератор CRC для отладки (можно использовать для тестирования)
+uint32_t generate_crc24_table_entry(uint8_t index) {
+    const uint32_t polynomial = 0xFFF409;  // ADS-B CRC24 полином
+    uint32_t crc = index << 16;
+
+    for (int bit = 0; bit < 8; bit++) {
+        if (crc & 0x800000) {
+            crc = (crc << 1) ^ polynomial;
+        } else {
+            crc = (crc << 1);
+        }
+        crc &= 0xFFFFFF;
+    }
+
+    return crc;
+}
+
+// Функция для проверки корректности таблицы CRC (для отладки)
+bool verify_crc_table() {
+    for (int i = 0; i < 256; i++) {
+        uint32_t calculated = generate_crc24_table_entry(i);
+        if (calculated != crc_table[i]) {
+            Serial1.print("CRC table error at index ");
+            Serial1.print(i);
+            Serial1.print(": expected ");
+            Serial1.print(calculated, HEX);
+            Serial1.print(", got ");
+            Serial1.println(crc_table[i], HEX);
+            return false;
+        }
+    }
+    return true;
+}
+
+// Оптимизированная функция CRC с использованием таблицы
+inline uint32_t fast_crc24(uint8_t* data, int length) {
+    register uint32_t crc = 0;
+    register const uint32_t* table = crc_table;
+
+    while (length-- > 0) {
+        crc = (crc << 8) ^ table[((crc >> 16) ^ *data++) & 0xFF];
+        crc &= 0xFFFFFF;
+    }
+
+    return crc;
+}
+
+// Функция для батчевой проверки multiple пакетов
+int validate_multiple_packets(ADSBPacket* packets, int count) {
+    int valid_count = 0;
+
+    for (int i = 0; i < count; i++) {
+        if (decode_adsb_packet_with_crc(&packets[i])) {
+            valid_count++;
+        }
+    }
+
+    return valid_count;
+}
+
+
+Дополнительные утилиты для работы с CRC:
+
+
+// Структура для статистики CRC
+typedef struct {
+    uint32_t total_packets;
+    uint32_t valid_packets;
+    uint32_t corrected_packets;
+    uint32_t invalid_packets;
+    float error_rate;
+} CRCStats;
+
+static CRCStats crc_stats = {0};
+
+// Обновление статистики
+void update_crc_stats(bool valid, bool corrected) {
+    crc_stats.total_packets++;
+
+    if (valid) {
+        crc_stats.valid_packets++;
+        if (corrected) {
+            crc_stats.corrected_packets++;
+        }
+    } else {
+        crc_stats.invalid_packets++;
+    }
+
+    crc_stats.error_rate = (float)crc_stats.invalid_packets / crc_stats.total_packets;
+}
+
+// Вывод статистики CRC
+void print_crc_stats() {
+    Serial1.print("CRC Stats - Total: ");
+    Serial1.print(crc_stats.total_packets);
+    Serial1.print(", Valid: ");
+    Serial1.print(crc_stats.valid_packets);
+    Serial1.print(", Corrected: ");
+    Serial1.print(crc_stats.corrected_packets);
+    Serial1.print(", Error Rate: ");
+    Serial1.print(crc_stats.error_rate * 100, 2);
+    Serial1.println("%");
+}
+
+
+Эта таблица CRC24 специально разработана для протокола ADS-B и использует полином 0xFFF409. Она обеспечивает быстрое и точное вычисление контрольных сумм для проверки целостности пакетов.

@@ -28,7 +28,7 @@
     <ApplicationTypeRevision>1.0</ApplicationTypeRevision>
     <TargetLinuxPlatform>Generic</TargetLinuxPlatform>
     <LinuxProjectType>{D51BCBC9-82E9-4017-911E-C93873C4EA2B}</LinuxProjectType>
-    <ProjectGuid>{CF271A61-3D8A-4A38-AF3E-86F3E24DFC99}</ProjectGuid>
+    <ProjectGuid>{CB63BDE6-A19E-40E7-B3C3-0A507BBEFAF9}</ProjectGuid>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
@@ -104,7 +104,7 @@
   </ImportGroup>
   <ProjectExtensions>
     <VisualStudio>
-      <UserProperties arduino.upload.port="COM17" />
+      <UserProperties arduino.upload.port="COM24" />
     </VisualStudio>
   </ProjectExtensions>
 </Project>

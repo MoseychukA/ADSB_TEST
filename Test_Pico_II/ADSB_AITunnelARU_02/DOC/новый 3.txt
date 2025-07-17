@@ -1,0 +1,405 @@
+Вот дополненная функция обработки прерывания от DMA с полной реализацией:
+
+
+// Глобальные переменные для DMA
+volatile uint8_t dma_buffer_0[DMA_BUFFER_SIZE];
+volatile uint8_t dma_buffer_1[DMA_BUFFER_SIZE];
+volatile bool dma_buffer_ready[2] = {false, false};
+volatile uint8_t current_dma_buffer = 0;
+volatile uint32_t dma_samples_count = 0;
+
+int dma_chan_0, dma_chan_1;
+uint32_t dma_transfer_count = 0;
+
+// Структура для хранения DMA данных
+struct DMAData {
+    uint8_t* buffer;
+    uint32_t size;
+    uint64_t timestamp;
+    uint8_t buffer_id;
+};
+
+std::queue<DMAData> dma_queue;
+
+// Инициализация DMA
+void init_dma() {
+    // Получение свободных DMA каналов
+    dma_chan_0 = dma_claim_unused_channel(true);
+    dma_chan_1 = dma_claim_unused_channel(true);
+
+    // Конфигурация первого DMA канала
+    dma_channel_config c0 = dma_channel_get_default_config(dma_chan_0);
+    channel_config_set_transfer_data_size(&c0, DMA_SIZE_8);
+    channel_config_set_read_increment(&c0, false); // Читаем из одного регистра GPIO
+    channel_config_set_write_increment(&c0, true); // Записываем в массив с инкрементом
+    channel_config_set_ring(&c0, true, 8); // Ring buffer 256 байт (2^8)
+    channel_config_set_irq_quiet(&c0, false); // Разрешить прерывания
+
+    // Конфигурация второго DMA канала (аналогично)
+    dma_channel_config c1 = dma_channel_get_default_config(dma_chan_1);
+    channel_config_set_transfer_data_size(&c1, DMA_SIZE_8);
+    channel_config_set_read_increment(&c1, false);
+    channel_config_set_write_increment(&c1, true);
+    channel_config_set_ring(&c1, true, 8);
+    channel_config_set_irq_quiet(&c1, false);
+
+    // Настройка источника данных (GPIO регистр)
+    uint32_t gpio_base = (uint32_t)&sio_hw->gpio_in;
+
+    // Конфигурация первого канала
+    dma_channel_configure(
+        dma_chan_0,
+        &c0,
+        (void*)dma_buffer_0,           // Destination
+        (const void*)gpio_base,        // Source (GPIO input register)
+        DMA_BUFFER_SIZE,              // Transfer count
+        false                         // Don't start yet
+    );
+
+    // Конфигурация второго канала
+    dma_channel_configure(
+        dma_chan_1,
+        &c1,
+        (void*)dma_buffer_1,          // Destination
+        (const void*)gpio_base,       // Source
+        DMA_BUFFER_SIZE,              // Transfer count
+        false                         // Don't start yet
+    );
+
+    // Настройка прерываний DMA
+    dma_channel_set_irq0_enabled(dma_chan_0, true);
+    dma_channel_set_irq0_enabled(dma_chan_1, true);
+
+    irq_set_exclusive_handler(DMA_IRQ_0, dma_irq_handler);
+    irq_set_enabled(DMA_IRQ_0, true);
+
+    Serial.println("DMA initialized");
+}
+
+// Запуск DMA захвата
+void start_dma_capture() {
+    current_dma_buffer = 0;
+    dma_buffer_ready[0] = false;
+    dma_buffer_ready[1] = false;
+
+    // Запуск первого канала
+    dma_channel_start(dma_chan_0);
+
+    Serial.println("DMA capture started");
+}
+
+// Переключение DMA буферов
+void switch_dma_buffer() {
+    if (current_dma_buffer == 0) {
+        // Переключаемся на второй буфер
+        current_dma_buffer = 1;
+
+        // Перезапускаем второй канал
+        dma_channel_configure(
+            dma_chan_1,
+            NULL,                     // Используем предыдущую конфигурацию
+            (void*)dma_buffer_1,
+            NULL,                     // Используем предыдущий источник
+            DMA_BUFFER_SIZE,
+            true                      // Запустить немедленно
+        );
+
+        // Помечаем первый буфер как готовый
+        dma_buffer_ready[0] = true;
+
+    } else {
+        // Переключаемся на первый буфер
+        current_dma_buffer = 0;
+
+        // Перезапускаем первый канал
+        dma_channel_configure(
+            dma_chan_0,
+            NULL,
+            (void*)dma_buffer_0,
+            NULL,
+            DMA_BUFFER_SIZE,
+            true
+        );
+
+        // Помечаем второй буфер как готовый
+        dma_buffer_ready[1] = true;
+    }
+}
+
+// Обработка прерывания от DMA
+void __isr dma_irq_handler() {
+    // Проверяем, какой канал вызвал прерывание
+    uint32_t ints = dma_hw->ints0;
+
+    if (ints & (1u << dma_chan_0)) {
+        // Прерывание от первого канала
+        dma_hw->ints0 = 1u << dma_chan_0; // Сброс флага прерывания
+
+        // Создаем структуру данных для очереди
+        DMAData dma_data;
+        dma_data.buffer = (uint8_t*)dma_buffer_0;
+        dma_data.size = DMA_BUFFER_SIZE;
+        dma_data.timestamp = time_us_64();
+        dma_data.buffer_id = 0;
+
+        // Добавляем в очередь для обработки
+        if (dma_queue.size() < 10) { // Ограничиваем размер очереди
+            dma_queue.push(dma_data);
+        }
+
+        dma_transfer_count++;
+        dma_samples_count += DMA_BUFFER_SIZE;
+
+        // Индикация активности DMA
+        digitalWrite(PREAMBLE_PIN_1, HIGH);
+        delayMicroseconds(10);
+        digitalWrite(PREAMBLE_PIN_1, LOW);
+
+        // Переключаем на второй буфер
+        switch_dma_buffer();
+
+        // Статистика для отладки
+        if (dma_transfer_count % 100 == 0) {
+            Serial.print("DMA transfers: ");
+            Serial.print(dma_transfer_count);
+            Serial.print(", Queue size: ");
+            Serial.println(dma_queue.size());
+        }
+    }
+
+    if (ints & (1u << dma_chan_1)) {
+        // Прерывание от второго канала
+        dma_hw->ints0 = 1u << dma_chan_1; // Сброс флага прерывания
+
+        // Создаем структуру данных для очереди
+        DMAData dma_data;
+        dma_data.buffer = (uint8_t*)dma_buffer_1;
+        dma_data.size = DMA_BUFFER_SIZE;
+        dma_data.timestamp = time_us_64();
+        dma_data.buffer_id = 1;
+
+        // Добавляем в очередь для обработки
+        if (dma_queue.size() < 10) {
+            dma_queue.push(dma_data);
+        }
+
+        dma_transfer_count++;
+        dma_samples_count += DMA_BUFFER_SIZE;
+
+        // Индикация активности DMA
+        digitalWrite(PREAMBLE_PIN_2, HIGH);
+        delayMicroseconds(10);
+        digitalWrite(PREAMBLE_PIN_2, LOW);
+
+        // Переключаем на первый буфер
+        switch_dma_buffer();
+    }
+
+    // Проверка на переполнение
+    if (dma_queue.size() >= 10) {
+        // Очищаем старые данные при переполнении
+        while (dma_queue.size() > 5) {
+            dma_queue.pop();
+        }
+        Serial.println("DMA queue overflow, cleared old data");
+    }
+}
+
+// Функция обработки DMA данных в основном цикле
+void process_dma_data() {
+    while (!dma_queue.empty()) {
+        DMAData dma_data = dma_queue.front();
+        dma_queue.pop();
+
+        // Извлечение битов из DMA буфера
+        for (int i = 0; i < dma_data.size; i++) {
+            uint8_t sample = dma_data.buffer[i];
+
+            // Извлекаем состояние нужных GPIO пинов
+            bool pin19_state = (sample >> (INPUT_PIN_1 % 8)) & 1;
+            bool pin22_state = (sample >> (INPUT_PIN_2 % 8)) & 1;
+
+            // Объединяем сигналы (можно использовать разные алгоритмы)
+            bool combined_signal = pin19_state || pin22_state;
+
+            // Добавляем в буфер битов для дальнейшей обработки
+            if (bit_count < ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+                packet_bits[bit_count] = combined_signal ? 1 : 0;
+                bit_count++;
+
+                // Проверка на преамбулу каждые 8 битов
+                if (bit_count >= PREAMBLE_LENGTH && bit_count % 8 == 0) {
+                    if (detect_preamble(packet_bits, bit_count - PREAMBLE_LENGTH)) {
+                        preamble_detected = true;
+                        digitalWrite(PREAMBLE_PIN_1, HIGH);
+                        bit_counter = bit_count - PREAMBLE_LENGTH;
+
+                        Serial.print("Preamble detected at bit ");
+                        Serial.println(bit_count - PREAMBLE_LENGTH);
+                    }
+                }
+
+                // Проверка завершения пакета
+                if (preamble_detected) {
+                    int data_bits = bit_count - (bit_counter + PREAMBLE_LENGTH);
+
+                    if (data_bits == ADSB_SHORT_PACKET_BITS * 2 ||
+                        data_bits == ADSB_LONG_PACKET_BITS * 2) {
+
+                        process_complete_packet(dma_data.timestamp);
+                    }
+                }
+            } else {
+                // Буфер переполнен, сброс
+                reset_packet_buffer();
+            }
+        }
+
+        // Применение фильтра помех к накопленным данным
+        if (bit_count > PREAMBLE_LENGTH * 2) {
+            if (!noise_filter(packet_bits, bit_count)) {
+                Serial.println("Noise detected, resetting buffer");
+                reset_packet_buffer();
+            }
+        }
+    }
+}
+
+// Функция обработки завершенного пакета
+void process_complete_packet(uint64_t timestamp) {
+    ADSBPacket packet;
+    packet.timestamp = timestamp;
+
+    // Определяем длину пакета
+    int data_bits = bit_count - (bit_counter + PREAMBLE_LENGTH);
+    packet.length = data_bits / 16; // Manchester: 2 бита на 1 бит данных
+
+    // Manchester декодирование
+    if (manchester_decode(&packet_bits[bit_counter + PREAMBLE_LENGTH],
+                         packet.data, data_bits)) {
+
+        // Отладочный вывод
+        Serial.print("DMA packet (");
+        Serial.print(packet.length);
+        Serial.print(" bytes, timestamp: ");
+        Serial.print((uint32_t)timestamp);
+        Serial.print("): ");
+        for (int i = 0; i < packet.length; i++) {
+            Serial.print(packet.data[i], HEX);
+            Serial.print(" ");
+        }
+        Serial.println();
+
+        // Проверка CRC
+        packet.valid_crc = verify_crc(packet.data, packet.length);
+        packet.error_corrected = false;
+
+        if (!packet.valid_crc) {
+            // Попытка коррекции
+            uint8_t backup_data[ADSB_LONG_PACKET_BYTES];
+            memcpy(backup_data, packet.data, packet.length);
+
+            if (correct_single_bit_error(packet.data, packet.length)) {
+                packet.valid_crc = true;
+                packet.error_corrected = true;
+                Serial.println("Single bit error corrected!");
+            } else {
+                // Восстанавливаем исходные данные
+                memcpy(packet.data, backup_data, packet.length);
+            }
+        }
+
+        // Добавляем в очередь обработки
+        if (packet.valid_crc || packet.error_corrected) {
+            received_packets.push(packet);
+        }
+
+    } else {
+        Serial.println("Manchester decode failed");
+    }
+
+    // Сброс состояния
+    reset_packet_buffer();
+}
+
+// Сброс буфера пакета
+void reset_packet_buffer() {
+    preamble_detected = false;
+    bit_count = 0;
+    bit_counter = 0;
+    digitalWrite(PREAMBLE_PIN_1, LOW);
+    digitalWrite(PREAMBLE_PIN_2, LOW);
+}
+
+// Получение статистики DMA
+void print_dma_statistics() {
+    static uint32_t last_stats_time = 0;
+
+    if (millis() - last_stats_time > 5000) { // Каждые 5 секунд
+        uint32_t sample_rate = dma_samples_count * 1000 / (millis() - last_stats_time);
+
+        Serial.print("DMA Statistics - Transfers: ");
+        Serial.print(dma_transfer_count);
+        Serial.print(", Samples: ");
+        Serial.print(dma_samples_count);
+        Serial.print(", Rate: ");
+        Serial.print(sample_rate);
+        Serial.println(" samples/sec");
+
+        dma_samples_count = 0;
+        last_stats_time = millis();
+    }
+}
+
+// Обновленная функция setup()
+void setup() {
+    // ... предыдущий код setup() ...
+
+    // Инициализация DMA
+    init_dma();
+
+    // Запуск DMA захвата
+    start_dma_capture();
+
+    // ... остальной код setup() ...
+}
+
+// Обновленная функция core0_task()
+void core0_task() {
+    static uint32_t last_led_toggle = 0;
+
+    while (true) {
+        uint32_t current_time = millis();
+
+        // Переключение LED каждые 1000 мс
+        if (current_time - last_led_toggle >= 1000) {
+            digitalWrite(CORE0_LED_PIN, !digitalRead(CORE0_LED_PIN));
+            last_led_toggle = current_time;
+        }
+
+        // Обработка DMA данных
+        process_dma_data();
+
+        // Обновление AGC
+        update_agc();
+
+        // Статистика DMA
+        print_dma_statistics();
+
+        delay(1);
+    }
+}
+
+
+Основные добавления в обработке DMA:
+
+Двойная буферизация - используются два DMA канала для непрерывного захвата данных
+Обработка прерываний - определение источника прерывания и переключение буферов
+Очередь DMA данных - буферизация захваченных данных для обработки в основном цикле
+Извлечение GPIO состояний - декодирование состояний пинов из DMA буфера
+Контроль переполнения - защита от переполнения очереди
+Статистика и отладка - мониторинг производительности DMA
+Интеграция с декодером - передача DMA данных в систему декодирования пакетов
+Временные метки - сохранение точного времени захвата данных
+
+Эта реализация обеспечивает эффективный захват высокоскоростных данных ADS-B с минимальными потерями.

@@ -1,0 +1,298 @@
+Вот реализация функции reset_packet_buffer() и связанных с ней функций:
+
+
+// Глобальные переменные для состояния пакета
+volatile bool preamble_detected = false;
+volatile uint32_t bit_counter = 0;
+volatile uint32_t bit_count = 0;
+volatile uint32_t packet_bits[ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH];
+volatile bool packet_processing = false;
+
+// Основная функция сброса буфера пакета
+void reset_packet_buffer() {
+    // Отключаем прерывания на время сброса для атомарности
+    noInterrupts();
+
+    // Сброс флагов состояния
+    preamble_detected = false;
+    bit_count = 0;
+    bit_counter = 0;
+    packet_processing = false;
+
+    // Очистка буфера битов (опционально - для отладки)
+    memset((void*)packet_bits, 0, sizeof(packet_bits));
+
+    // Сброс индикаторов преамбулы
+    gpio_put(PREAMBLE_PIN_1, false);
+    gpio_put(PREAMBLE_PIN_2, false);
+
+    // Включаем прерывания обратно
+    interrupts();
+
+    // Отладочное сообщение (только в debug режиме)
+    #ifdef DEBUG_PACKET_PROCESSING
+    Serial.println("Packet buffer reset");
+    #endif
+}
+
+// Расширенная версия с дополнительными проверками
+void reset_packet_buffer_safe() {
+    // Защита от повторного вызова
+    if (packet_processing) {
+        return;
+    }
+
+    packet_processing = true;
+
+    // Критическая секция
+    uint32_t saved_interrupts = save_and_disable_interrupts();
+
+    // Сохранение статистики перед сбросом
+    static uint32_t reset_count = 0;
+    static uint32_t last_reset_time = 0;
+
+    uint32_t current_time = millis();
+    reset_count++;
+
+    // Проверка частоты сбросов (возможная индикация проблем)
+    if (current_time - last_reset_time < 100 && reset_count > 10) {
+        Serial.println("Warning: Frequent packet buffer resets detected");
+    }
+    last_reset_time = current_time;
+
+    // Основной сброс
+    preamble_detected = false;
+    bit_count = 0;
+    bit_counter = 0;
+
+    // Очистка буфера
+    for (int i = 0; i < ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH; i++) {
+        packet_bits[i] = 0;
+    }
+
+    // Сброс GPIO индикаторов
+    gpio_put(PREAMBLE_PIN_1, false);
+    gpio_put(PREAMBLE_PIN_2, false);
+
+    // Восстановление прерываний
+    restore_interrupts(saved_interrupts);
+
+    packet_processing = false;
+
+    #ifdef DEBUG_VERBOSE
+    Serial.print("Buffer reset #");
+    Serial.println(reset_count);
+    #endif
+}
+
+// Умный сброс с сохранением частичных данных
+void smart_packet_buffer_reset() {
+    noInterrupts();
+
+    // Если у нас есть частичные данные, попробуем их сохранить
+    if (bit_count > PREAMBLE_LENGTH && bit_count < ADSB_SHORT_PACKET_BITS) {
+        // Сдвигаем данные в начало буфера для возможного продолжения
+        for (int i = 0; i < PREAMBLE_LENGTH; i++) {
+            packet_bits[i] = packet_bits[bit_count - PREAMBLE_LENGTH + i];
+        }
+        bit_count = PREAMBLE_LENGTH;
+    } else {
+        // Полный сброс
+        bit_count = 0;
+        memset((void*)packet_bits, 0, sizeof(packet_bits));
+    }
+
+    preamble_detected = false;
+    bit_counter = 0;
+
+    gpio_put(PREAMBLE_PIN_1, false);
+    gpio_put(PREAMBLE_PIN_2, false);
+
+    interrupts();
+}
+
+// Тimed reset - сброс по таймауту
+void timed_packet_buffer_reset() {
+    static uint32_t last_activity_time = 0;
+    static bool timeout_reset_active = false;
+
+    uint32_t current_time = millis();
+
+    // Обновляем время активности
+    if (bit_count > 0 || preamble_detected) {
+        last_activity_time = current_time;
+        timeout_reset_active = true;
+    }
+
+    // Проверяем таймаут (например, 100 мс без активности)
+    if (timeout_reset_active && (current_time - last_activity_time > 100)) {
+        Serial.println("Packet buffer timeout reset");
+        reset_packet_buffer();
+        timeout_reset_active = false;
+    }
+}
+
+// Функция для проверки состояния буфера
+bool is_packet_buffer_valid() {
+    // Проверка корректности состояния
+    if (bit_count > ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+        return false;
+    }
+
+    if (preamble_detected && bit_counter > ADSB_LONG_PACKET_BITS * 2) {
+        return false;
+    }
+
+    if (bit_counter > bit_count) {
+        return false;
+    }
+
+    return true;
+}
+
+// Функция для принудительной очистки при критических ошибках
+void force_packet_buffer_reset() {
+    // Отключаем все прерывания
+    cli();
+
+    // Полная очистка всех состояний
+    preamble_detected = false;
+    bit_count = 0;
+    bit_counter = 0;
+    packet_processing = false;
+
+    // Очистка буфера
+    memset((void*)packet_bits, 0, sizeof(packet_bits));
+
+    // Сброс всех GPIO
+    gpio_put(PREAMBLE_PIN_1, false);
+    gpio_put(PREAMBLE_PIN_2, false);
+
+    // Сброс DMA состояний если нужно
+    for (int i = 0; i < 2; i++) {
+        dma_buffer_ready[i] = false;
+    }
+
+    // Включаем прерывания
+    sei();
+
+    Serial.println("FORCE: Packet buffer reset");
+}
+
+// Функция инициализации буфера пакета
+void init_packet_buffer() {
+    // Начальная инициализация
+    reset_packet_buffer();
+
+    // Проверка размеров буферов
+    Serial.print("Packet buffer size: ");
+    Serial.print(sizeof(packet_bits));
+    Serial.println(" bytes");
+
+    Serial.print("Max packet bits: ");
+    Serial.println(ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH);
+
+    // Тест буфера
+    packet_bits[0] = 1;
+    packet_bits[1] = 0;
+
+    if (packet_bits[0] == 1 && packet_bits[1] == 0) {
+        Serial.println("Packet buffer test: OK");
+    } else {
+        Serial.println("Packet buffer test: FAILED");
+    }
+
+    reset_packet_buffer();
+}
+
+// Функция для получения статистики буфера
+void print_packet_buffer_stats() {
+    Serial.println("=== Packet Buffer Statistics ===");
+    Serial.print("Current bit count: ");
+    Serial.println(bit_count);
+    Serial.print("Bit counter: ");
+    Serial.println(bit_counter);
+    Serial.print("Preamble detected: ");
+    Serial.println(preamble_detected ? "Yes" : "No");
+    Serial.print("Processing flag: ");
+    Serial.println(packet_processing ? "Yes" : "No");
+    Serial.print("Buffer valid: ");
+    Serial.println(is_packet_buffer_valid() ? "Yes" : "No");
+
+    if (bit_count > 0) {
+        Serial.print("First 16 bits: ");
+        for (int i = 0; i < min(16, (int)bit_count); i++) {
+            Serial.print(packet_bits[i]);
+        }
+        Serial.println();
+    }
+    Serial.println("===============================");
+}
+
+// Макросы для удобства
+#define RESET_PACKET_BUFFER() reset_packet_buffer()
+#define RESET_PACKET_BUFFER_SAFE() reset_packet_buffer_safe()
+#define CHECK_PACKET_TIMEOUT() timed_packet_buffer_reset()
+
+// Интеграция в основной цикл ядра 0
+void core0_task_updated() {
+    static uint32_t last_led_toggle = 0;
+    static uint32_t last_buffer_check = 0;
+
+    while (true) {
+        uint32_t current_time = millis();
+
+        // Переключение LED каждые 1000 мс
+        if (current_time - last_led_toggle >= 1000) {
+            digitalWrite(CORE0_LED_PIN, !digitalRead(CORE0_LED_PIN));
+            last_led_toggle = current_time;
+        }
+
+        // Проверка таймаута буфера каждые 50 мс
+        if (current_time - last_buffer_check >= 50) {
+            CHECK_PACKET_TIMEOUT();
+
+            // Проверка валидности буфера
+            if (!is_packet_buffer_valid()) {
+                Serial.println("Invalid buffer state detected");
+                RESET_PACKET_BUFFER_SAFE();
+            }
+
+            last_buffer_check = current_time;
+        }
+
+        // Обработка DMA данных
+        process_dma_data();
+
+        // Обновление AGC
+        update_agc();
+
+        // Статистика DMA
+        print_dma_statistics();
+
+        delay(1);
+    }
+}
+
+// Версия для использования в прерываниях
+inline void reset_packet_buffer_isr() {
+    preamble_detected = false;
+    bit_count = 0;
+    bit_counter = 0;
+    gpio_put(PREAMBLE_PIN_1, false);
+    gpio_put(PREAMBLE_PIN_2, false);
+}
+
+
+Эта реализация включает:
+
+Основная функция reset_packet_buffer() - простой и быстрый сброс
+Безопасная версия с проверками и защитой от race conditions
+Умный сброс с сохранением частичных данных
+Сброс по таймауту для предотвращения зависания
+Принудительный сброс для критических ситуаций
+Функции диагностики и статистики
+Inline версия для использования в прерываниях
+Интеграция в основные циклы программы
+
+Функция надежно сбрасывает все состояния буфера пакета и готовит систему к приему новых данных.

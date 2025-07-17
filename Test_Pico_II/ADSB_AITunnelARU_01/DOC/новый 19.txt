@@ -1,0 +1,319 @@
+Вы правы! Функция packet_queue_pop объявлена неправильно. Вот исправленная версия:
+
+
+// Исправленная функция packet_queue_pop
+bool packet_queue_pop(PacketQueue queue, ADSBPacket packet) {
+    if (queue->count == 0) {
+        return false; // Очередь пустая
+    }
+
+    noInterrupts();
+
+    *packet = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return true;
+}
+
+// Исправленная функция decoded_queue_pop
+bool decoded_queue_pop(DecodedQueue queue, DecodedADSB decoded) {
+    if (queue->count == 0) {
+        return false;
+    }
+
+    noInterrupts();
+
+    *decoded = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_DECODED_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return true;
+}
+
+// Безопасная обработка принятых пакетов (исправленная версия)
+void process_received_packets() {
+    ADSBPacket packet;
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    // Теперь вызов будет корректным
+    while (packets_processed < max_packets_per_call &&
+           packet_queue_pop(&received_packets, &packet)) {
+
+        packets_processed++;
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                // Отправка в UART2
+                send_decoded_packet_uart(decoded, packet);
+
+                // Добавляем в очередь декодированных пакетов
+                decoded_queue_push(&decoded_packets, decoded);
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.println(" packets");
+    }
+}
+
+// Альтернативная версия с явной проверкой на пустоту
+void process_received_packets_safe() {
+    ADSBPacket packet;
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    while (packets_processed < max_packets_per_call) {
+        // Сначала проверяем, есть ли пакеты
+        if (packet_queue_empty(&received_packets)) {
+            break; // Очередь пустая
+        }
+
+        // Пытаемся получить пакет
+        if (!packet_queue_pop(&received_packets, &packet)) {
+            break; // Не удалось получить пакет
+        }
+
+        packets_processed++;
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet);
+                decoded_queue_push(&decoded_packets, decoded);
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.println(" packets");
+    }
+}
+
+// Функция для добавления пакета в очередь
+bool add_received_packet(const ADSBPacket& packet) {
+    return packet_queue_push(&received_packets, packet);
+}
+
+// Функция обработки завершенного пакета
+void process_complete_packet(uint64_t timestamp) {
+    ADSBPacket packet;
+    packet.timestamp = timestamp;
+
+    // Определяем длину пакета
+    int data_bits = bit_count - (bit_counter + PREAMBLE_LENGTH);
+    packet.length = data_bits / 16; // Manchester: 2 бита на 1 бит данных
+
+    if (packet.length < 7 || packet.length > 14) {
+        Serial.println("Invalid packet length");
+        reset_packet_buffer_isr();
+        return;
+    }
+
+    // Manchester декодирование
+    if (manchester_decode_transitions((uint32_t*)&packet_bits[bit_counter + PREAMBLE_LENGTH],
+                                    packet.data, data_bits)) {
+
+        // Отладочный вывод
+        Serial.print("Packet (");
+        Serial.print(packet.length);
+        Serial.print(" bytes): ");
+        for (int i = 0; i < packet.length; i++) {
+            if (packet.data[i] < 0x10) Serial.print("0");
+            Serial.print(packet.data[i], HEX);
+            Serial.print(" ");
+        }
+        Serial.println();
+
+        // Проверка CRC
+        packet.valid_crc = verify_crc(packet.data, packet.length);
+        packet.error_corrected = false;
+
+        if (!packet.valid_crc) {
+            // Создаем копию для восстановления
+            uint8_t backup_data[ADSB_LONG_PACKET_BYTES];
+            memcpy(backup_data, packet.data, packet.length);
+
+            if (correct_single_bit_error(packet.data, packet.length)) {
+                packet.valid_crc = true;
+                packet.error_corrected = true;
+                Serial.println("Single bit error corrected!");
+            } else {
+                // Восстанавливаем исходные данные
+                memcpy(packet.data, backup_data, packet.length);
+                Serial.println("CRC check failed");
+            }
+        } else {
+            Serial.println("CRC check passed");
+        }
+
+        // Добавляем в очередь только валидные пакеты
+        if (packet.valid_crc) {
+            if (add_received_packet(packet)) {
+                Serial.print("Packet added to queue. Size: ");
+                Serial.println(packet_queue_size(&received_packets));
+            } else {
+                Serial.println("Failed to add packet to queue");
+            }
+        }
+
+    } else {
+        Serial.println("Manchester decode failed");
+    }
+
+    // Сброс состояния
+    reset_packet_buffer_isr();
+}
+
+// Обновленное прерывание с обработкой завершенных пакетов
+void signal_interrupt() {
+    static uint32_t last_time = 0;
+    static uint32_t local_bit_count = 0;
+
+    uint32_t current_time = micros();
+    uint32_t pulse_width = current_time - last_time;
+    last_time = current_time;
+
+    // Определение бита на основе длительности импульса
+    bool bit_value = false;
+    if (pulse_width > 400 && pulse_width < 600) { // 0.5 мкс ±20%
+        bit_value = digitalRead(INPUT_PIN_1);
+    }
+
+    // Сохранение бита
+    if (local_bit_count < ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+        packet_bits[local_bit_count] = bit_value ? 1 : 0;
+        local_bit_count++;
+        bit_count = local_bit_count; // Обновляем глобальную переменную
+    }
+
+    // Проверка на преамбулу
+    if (local_bit_count >= PREAMBLE_LENGTH) {
+        if (detect_preamble((uint32_t*)packet_bits, local_bit_count - PREAMBLE_LENGTH)) {
+            preamble_detected = true;
+            digitalWrite(PREAMBLE_PIN_1, HIGH);
+            bit_counter = local_bit_count - PREAMBLE_LENGTH; // Устанавливаем позицию после преамбулы
+        }
+    }
+
+    // Если обнаружена преамбула, проверяем завершение пакета
+    if (preamble_detected) {
+        int data_bits_collected = local_bit_count - bit_counter - PREAMBLE_LENGTH;
+
+        // Проверяем завершение пакета
+        if (data_bits_collected == ADSB_SHORT_PACKET_BITS * 2 ||
+            data_bits_collected == ADSB_LONG_PACKET_BITS * 2) {
+
+            // Обработка завершенного пакета
+            process_complete_packet(current_time);
+            local_bit_count = 0; // Сброс для нового пакета
+        }
+    }
+
+    // Сброс если слишком много битов без валидного пакета
+    if (local_bit_count > ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+        reset_packet_buffer_isr();
+        local_bit_count = 0;
+    }
+}
+
+// Расширенная версия reset_packet_buffer_isr
+inline void reset_packet_buffer_isr() {
+    preamble_detected = false;
+    bit_count = 0;
+    bit_counter = 0;
+    digitalWrite(PREAMBLE_PIN_1, LOW);
+    digitalWrite(PREAMBLE_PIN_2, LOW);
+
+    // Очистка буфера битов (опционально)
+    memset((void*)packet_bits, 0, sizeof(packet_bits));
+}
+
+// Обновленная задача для ядра 1 (обработка)
+void core1_task() {
+    static uint32_t last_led_toggle = 0;
+
+    while (true) {
+        uint32_t current_time = millis();
+
+        // Переключение LED каждые 500 мс
+        if (current_time - last_led_toggle >= 500) {
+            digitalWrite(CORE1_LED_PIN, !digitalRead(CORE1_LED_PIN));
+            last_led_toggle = current_time;
+        }
+
+        // Безопасная обработка принятых пакетов
+        process_received_packets_safe();
+
+        // Статистика очередей
+        print_queue_statistics();
+
+        delay(1);
+    }
+}
+
+// Функция для проверки состояния очередей
+void check_queue_health() {
+    static uint32_t last_check = 0;
+    uint32_t current_time = millis();
+
+    if (current_time - last_check > 10000) { // Каждые 10 секунд
+        int queue_size = packet_queue_size(&received_packets);
+
+        if (queue_size > MAX_QUEUE_SIZE * 0.8) {
+            Serial.println("Warning: Packet queue nearly full");
+        }
+
+        if (queue_size == 0) {
+            Serial.println("Info: No packets in queue");
+        }
+
+        last_check = current_time;
+    }
+}
+
+// Обновленная задача для ядра 0
+void core0_task() {
+    static uint32_t last_led_toggle = 0;
+
+    while (true) {
+        uint32_t current_time = millis();
+
+        // Переключение LED каждые 1000 мс
+        if (current_time - last_led_toggle >= 1000) {
+            digitalWrite(CORE0_LED_PIN, !digitalRead(CORE0_LED_PIN));
+            last_led_toggle = current_time;
+        }
+
+        // Обновление AGC
+        update_agc();
+
+        // Проверка состояния очередей
+        check_queue_health();
+
+        delay(1);
+    }
+}
+
+
+Основные изменения:
+
+Исправлена сигнатура packet_queue_pop - теперь принимает PacketQueue и ADSBPacket
+Исправлена сигнатура decoded_queue_pop - аналогично
+Добавлена функция add_received_packet для добавления пакетов в очередь
+Улучшена обработка завершенных пакетов в прерывании
+Добавлены дополнительные проверки состояния очередей
+Исправлена логика обработки преамбулы и подсчета битов
+
+Теперь код должен успешно компилироваться без ошибок типов аргументов.

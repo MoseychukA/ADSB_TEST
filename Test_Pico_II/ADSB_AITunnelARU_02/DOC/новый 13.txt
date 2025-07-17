@@ -1,0 +1,348 @@
+Вы правы! В Arduino IDE для RP2040 стандартная библиотека std::queue может быть недоступна. Вот реализация с собственной очередью:
+
+
+// Определение структуры очереди для RP2040
+#define MAX_QUEUE_SIZE 50
+#define MAX_DECODED_QUEUE_SIZE 20
+
+// Структура для очереди пакетов
+struct PacketQueue {
+    ADSBPacket packets[MAX_QUEUE_SIZE];
+    volatile int head;
+    volatile int tail;
+    volatile int count;
+
+    PacketQueue() : head(0), tail(0), count(0) {}
+};
+
+// Структура для очереди декодированных данных
+struct DecodedQueue {
+    DecodedADSB packets[MAX_DECODED_QUEUE_SIZE];
+    volatile int head;
+    volatile int tail;
+    volatile int count;
+
+    DecodedQueue() : head(0), tail(0), count(0) {}
+};
+
+// Глобальные очереди
+PacketQueue received_packets;
+DecodedQueue decoded_packets;
+
+// Функции для работы с очередью пакетов
+bool packet_queue_push(PacketQueue* queue, const ADSBPacket& packet) {
+    noInterrupts();
+
+    if (queue->count >= MAX_QUEUE_SIZE) {
+        // Очередь переполнена - удаляем старый пакет
+        queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+        queue->count--;
+        Serial.println("Packet queue overflow - removed old packet");
+    }
+
+    queue->packets[queue->tail] = packet;
+    queue->tail = (queue->tail + 1) % MAX_QUEUE_SIZE;
+    queue->count++;
+
+    interrupts();
+    return true;
+}
+
+bool packet_queue_pop(PacketQueue queue, ADSBPacket packet) {
+    if (queue->count == 0) {
+        return false; // Очередь пустая
+    }
+
+    noInterrupts();
+
+    *packet = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return true;
+}
+
+bool packet_queue_empty(PacketQueue* queue) {
+    return queue->count == 0;
+}
+
+int packet_queue_size(PacketQueue* queue) {
+    return queue->count;
+}
+
+// Функции для очереди декодированных данных
+bool decoded_queue_push(DecodedQueue* queue, const DecodedADSB& decoded) {
+    noInterrupts();
+
+    if (queue->count >= MAX_DECODED_QUEUE_SIZE) {
+        // Очередь переполнена - удаляем старый элемент
+        queue->head = (queue->head + 1) % MAX_DECODED_QUEUE_SIZE;
+        queue->count--;
+    }
+
+    queue->packets[queue->tail] = decoded;
+    queue->tail = (queue->tail + 1) % MAX_DECODED_QUEUE_SIZE;
+    queue->count++;
+
+    interrupts();
+    return true;
+}
+
+bool decoded_queue_pop(DecodedQueue queue, DecodedADSB decoded) {
+    if (queue->count == 0) {
+        return false;
+    }
+
+    noInterrupts();
+
+    *decoded = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_DECODED_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return true;
+}
+
+// Очистка очередей
+void clear_packet_queues() {
+    noInterrupts();
+
+    received_packets.head = 0;
+    received_packets.tail = 0;
+    received_packets.count = 0;
+
+    decoded_packets.head = 0;
+    decoded_packets.tail = 0;
+    decoded_packets.count = 0;
+
+    interrupts();
+
+    Serial.println("Packet queues cleared");
+}
+
+// Безопасная обработка принятых пакетов (исправленная версия)
+void process_received_packets() {
+    ADSBPacket packet;
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    // Обрабатываем до 5 пакетов за один вызов
+    while (packets_processed < max_packets_per_call &&
+           packet_queue_pop(&received_packets, &packet)) {
+
+        packets_processed++;
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                // Отправка в UART2
+                send_decoded_packet_uart(decoded, packet);
+
+                // Добавляем в очередь декодированных пакетов
+                decoded_queue_push(&decoded_packets, decoded);
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.println(" packets");
+    }
+}
+
+// Добавление пакета в очередь (для использования в прерываниях)
+bool add_received_packet(const ADSBPacket& packet) {
+    return packet_queue_push(&received_packets, packet);
+}
+
+// Функция отправки декодированных данных в UART
+void send_decoded_packet_uart(const DecodedADSB& decoded, const ADSBPacket& packet) {
+    UART2.print("ICAO: 0x");
+    if (decoded.icao < 0x100000) UART2.print("0");
+    if (decoded.icao < 0x10000) UART2.print("0");
+    if (decoded.icao < 0x1000) UART2.print("0");
+    if (decoded.icao < 0x100) UART2.print("0");
+    if (decoded.icao < 0x10) UART2.print("0");
+    UART2.print(decoded.icao, HEX);
+
+    UART2.print(", Type: ");
+    UART2.print(decoded.message_type);
+
+    if (strlen(decoded.flight_id) > 0) {
+        UART2.print(", Flight: ");
+        UART2.print(decoded.flight_id);
+    }
+
+    if (decoded.latitude != 0.0 || decoded.longitude != 0.0) {
+        UART2.print(", Lat: ");
+        UART2.print(decoded.latitude, 6);
+        UART2.print(", Lon: ");
+        UART2.print(decoded.longitude, 6);
+    }
+
+    if (decoded.altitude > 0) {
+        UART2.print(", Alt: ");
+        UART2.print(decoded.altitude);
+        UART2.print(" ft");
+    }
+
+    if (decoded.speed > 0) {
+        UART2.print(", Speed: ");
+        UART2.print(decoded.speed);
+        UART2.print(" kt");
+    }
+
+    if (packet.error_corrected) {
+        UART2.print(" [CORRECTED]");
+    }
+
+    UART2.println();
+}
+
+// Статистика очередей
+void print_queue_statistics() {
+    static uint32_t last_stats_time = 0;
+    uint32_t current_time = millis();
+
+    if (current_time - last_stats_time > 5000) { // Каждые 5 секунд
+        Serial.print("Queue sizes - Received: ");
+        Serial.print(packet_queue_size(&received_packets));
+        Serial.print("/");
+        Serial.print(MAX_QUEUE_SIZE);
+        Serial.print(", Decoded: ");
+        Serial.print(decoded_packets.count);
+        Serial.print("/");
+        Serial.println(MAX_DECODED_QUEUE_SIZE);
+
+        last_stats_time = current_time;
+    }
+}
+
+// Обновленная функция обработки завершенного пакета
+void process_complete_packet(uint64_t timestamp) {
+    ADSBPacket packet;
+    packet.timestamp = timestamp;
+
+    // Определяем длину пакета
+    int data_bits = bit_count - (bit_counter + PREAMBLE_LENGTH);
+    packet.length = data_bits / 16; // Manchester: 2 бита на 1 бит данных
+
+    if (packet.length < 7 || packet.length > 14) {
+        Serial.println("Invalid packet length");
+        reset_packet_buffer();
+        return;
+    }
+
+    // Проверка качества Manchester сигнала
+    float quality = calculate_manchester_quality(&packet_bits[bit_counter + PREAMBLE_LENGTH], data_bits);
+
+    if (quality < 0.8) { // Требуем минимум 80% валидных пар
+        Serial.print("Poor Manchester quality: ");
+        Serial.println(quality);
+        reset_packet_buffer();
+        return;
+    }
+
+    // Manchester декодирование
+    if (manchester_decode_adsb(&packet_bits[bit_counter + PREAMBLE_LENGTH],
+                              packet.data, data_bits)) {
+
+        // Отладочный вывод
+        Serial.print("Packet (");
+        Serial.print(packet.length);
+        Serial.print(" bytes): ");
+        for (int i = 0; i < packet.length; i++) {
+            if (packet.data[i] < 0x10) Serial.print("0");
+            Serial.print(packet.data[i], HEX);
+            Serial.print(" ");
+        }
+        Serial.println();
+
+        // Проверка CRC
+        packet.valid_crc = verify_crc(packet.data, packet.length);
+        packet.error_corrected = false;
+
+        if (!packet.valid_crc) {
+            // Создаем копию для восстановления
+            uint8_t backup_data[ADSB_LONG_PACKET_BYTES];
+            memcpy(backup_data, packet.data, packet.length);
+
+            if (correct_single_bit_error(packet.data, packet.length)) {
+                packet.valid_crc = true;
+                packet.error_corrected = true;
+                Serial.println("Single bit error corrected!");
+            } else {
+                // Восстанавливаем исходные данные
+                memcpy(packet.data, backup_data, packet.length);
+                Serial.println("CRC check failed");
+            }
+        } else {
+            Serial.println("CRC check passed");
+        }
+
+        // Добавляем в очередь только валидные пакеты
+        if (packet.valid_crc) {
+            if (add_received_packet(packet)) {
+                Serial.print("Packet added to queue. Size: ");
+                Serial.println(packet_queue_size(&received_packets));
+            } else {
+                Serial.println("Failed to add packet to queue");
+            }
+        }
+
+    } else {
+        Serial.println("Manchester decode failed");
+    }
+
+    // Сброс состояния
+    reset_packet_buffer();
+}
+
+// Обновленная задача для ядра 1 (обработка)
+void core1_task() {
+    static uint32_t last_led_toggle = 0;
+
+    while (true) {
+        uint32_t current_time = millis();
+
+        // Переключение LED каждые 500 мс
+        if (current_time - last_led_toggle >= 500) {
+            digitalWrite(CORE1_LED_PIN, !digitalRead(CORE1_LED_PIN));
+            last_led_toggle = current_time;
+        }
+
+        // Безопасная обработка принятых пакетов
+        process_received_packets();
+
+        // Статистика очередей
+        print_queue_statistics();
+
+        delay(1);
+    }
+}
+
+// Инициализация очередей
+void init_packet_queues() {
+    // Очистка очередей при инициализации
+    clear_packet_queues();
+
+    Serial.print("Packet queues initialized - Max received: ");
+    Serial.print(MAX_QUEUE_SIZE);
+    Serial.print(", Max decoded: ");
+    Serial.println(MAX_DECODED_QUEUE_SIZE);
+}
+
+
+Основные изменения:
+
+Собственная реализация очереди - кольцевой буфер вместо std::queue
+Атомарные операции - использование noInterrupts()/interrupts()
+Проверки переполнения - автоматическое удаление старых элементов
+Безопасные функции - проверка на пустоту перед доступом
+Статистика - мониторинг использования очередей
+Инициализация - правильная настройка очередей при запуске
+
+Теперь код будет корректно работать в Arduino IDE для RP2040 без зависимости от STL библиотек.

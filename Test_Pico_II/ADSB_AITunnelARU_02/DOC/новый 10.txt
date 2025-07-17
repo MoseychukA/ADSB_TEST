@@ -1,0 +1,247 @@
+Вы правильно заметили! В коде для RP2040 атрибут IRAM_ATTR не подходит - это специфично для ESP32. Вот исправленная версия для RP2040:
+
+
+// Прерывание для обнаружения сигнала (исправлено для RP2040)
+void signal_interrupt() {
+    static uint32_t last_time = 0;
+    static uint32_t bit_buffer = 0;
+    static int bit_count = 0;
+
+    uint32_t current_time = micros();
+    uint32_t pulse_width = current_time - last_time;
+    last_time = current_time;
+
+    // Определение бита на основе длительности импульса
+    bool bit_value = false;
+    if (pulse_width > 400 && pulse_width < 600) { // 0.5 мкс ±20% (в наносекундах)
+        bit_value = digitalRead(INPUT_PIN_1);
+    }
+
+    // Сохранение бита
+    if (bit_count < ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+        packet_bits[bit_count] = bit_value ? 1 : 0;
+        bit_count++;
+    }
+
+    // Проверка на преамбулу
+    if (bit_count >= PREAMBLE_LENGTH) {
+        if (detect_preamble(packet_bits, bit_count - PREAMBLE_LENGTH)) {
+            preamble_detected = true;
+            gpio_put(PREAMBLE_PIN_1, true);
+            bit_counter = 0;
+        }
+    }
+
+    // Если обнаружена преамбула, собираем пакет
+    if (preamble_detected) {
+        bit_counter++;
+
+        // Проверяем завершение пакета
+        if (bit_counter == ADSB_SHORT_PACKET_BITS  2 || bit_counter == ADSB_LONG_PACKET_BITS  2) {
+            // Обработка завершенного пакета будет в основном цикле
+            // чтобы минимизировать время в прерывании
+        }
+    }
+
+    // Сброс если слишком много битов без валидного пакета
+    if (bit_count > ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+        reset_packet_buffer();
+    }
+}
+
+// Альтернативная версия с использованием RP2040 SDK функций
+void __isr signal_interrupt_fast() {
+    static uint32_t last_time = 0;
+    static volatile bool packet_ready = false;
+
+    uint32_t current_time = time_us_32();
+    uint32_t pulse_width = current_time - last_time;
+    last_time = current_time;
+
+    // Быстрое чтение GPIO через регистры RP2040
+    uint32_t gpio_state = sio_hw->gpio_in;
+    bool pin19_state = (gpio_state >> INPUT_PIN_1) & 1;
+    bool pin22_state = (gpio_state >> INPUT_PIN_2) & 1;
+
+    // Объединение сигналов (OR логика)
+    bool combined_signal = pin19_state | pin22_state;
+
+    // Минимальная обработка в прерывании
+    if (bit_count < ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+        packet_bits[bit_count] = combined_signal ? 1 : 0;
+        bit_count++;
+
+        // Простая проверка на завершение
+        if (bit_count >= ADSB_SHORT_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+            packet_ready = true;
+        }
+    } else {
+        // Переполнение буфера
+        bit_count = 0;
+        packet_ready = false;
+    }
+}
+
+// Оптимизированная версия для высокой частоты выборки
+void __time_critical_func(high_speed_signal_interrupt)() {
+    // Функция выполняется в RAM для максимальной скорости
+    static uint32_t sample_counter = 0;
+    static uint32_t last_edge_time = 0;
+
+    uint32_t current_time = time_us_32();
+
+    // Быстрое чтение GPIO
+    uint32_t gpio_in = sio_hw->gpio_in;
+    bool signal_state = ((gpio_in >> INPUT_PIN_1) | (gpio_in >> INPUT_PIN_2)) & 1;
+
+    // Сохранение сэмпла в DMA буфер или прямо в массив
+    if (sample_counter < DMA_BUFFER_SIZE) {
+        dma_buffer_0[sample_counter] = signal_state;
+        sample_counter++;
+    }
+
+    // Детекция фронтов
+    static bool last_signal_state = false;
+    if (signal_state != last_signal_state) {
+        last_edge_time = current_time;
+
+        // Индикация активности
+        gpio_xor_mask(1u << PREAMBLE_PIN_1);
+    }
+    last_signal_state = signal_state;
+
+    // Проверка переполнения буфера
+    if (sample_counter >= DMA_BUFFER_SIZE) {
+        sample_counter = 0;
+        // Установка флага для обработки в основном цикле
+        dma_buffer_ready[0] = true;
+    }
+}
+
+// Настройка прерываний для RP2040
+void setup_interrupts_rp2040() {
+    // Настройка GPIO для прерываний
+    gpio_init(INPUT_PIN_1);
+    gpio_init(INPUT_PIN_2);
+    gpio_set_dir(INPUT_PIN_1, GPIO_IN);
+    gpio_set_dir(INPUT_PIN_2, GPIO_IN);
+
+    gpio_init(PREAMBLE_PIN_1);
+    gpio_init(PREAMBLE_PIN_2);
+    gpio_set_dir(PREAMBLE_PIN_1, GPIO_OUT);
+    gpio_set_dir(PREAMBLE_PIN_2, GPIO_OUT);
+
+    // Настройка прерываний на изменение уровня
+    gpio_set_irq_enabled_with_callback(INPUT_PIN_1,
+                                       GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL,
+                                       true,
+                                       &signal_interrupt);
+
+    gpio_set_irq_enabled(INPUT_PIN_2,
+                        GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL,
+                        true);
+
+    Serial.println("RP2040 interrupts configured");
+}
+
+// Альтернативная настройка с использованием Arduino-style функций
+void setup_interrupts_arduino() {
+    pinMode(INPUT_PIN_1, INPUT);
+    pinMode(INPUT_PIN_2, INPUT);
+    pinMode(PREAMBLE_PIN_1, OUTPUT);
+    pinMode(PREAMBLE_PIN_2, OUTPUT);
+
+    // Arduino-style прерывания (совместимость)
+    attachInterrupt(digitalPinToInterrupt(INPUT_PIN_1), signal_interrupt, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(INPUT_PIN_2), signal_interrupt, CHANGE);
+
+    Serial.println("Arduino-style interrupts configured");
+}
+
+// Функция для настройки таймера-прерывания для регулярной выборки
+void setup_timer_sampling() {
+    // Создание повторяющегося таймера для выборки на 2 МГц
+    struct repeating_timer timer;
+
+    // Запуск таймера каждые 0.5 микросекунд (2 МГц)
+    add_repeating_timer_us(1, timer_callback, NULL, &timer);
+
+    Serial.println("Timer sampling configured at 1MHz");
+}
+
+// Callback для таймера
+bool timer_callback(struct repeating_timer *t) {
+    static uint32_t sample_index = 0;
+
+    // Быстрая выборка GPIO
+    uint32_t gpio_state = sio_hw->gpio_in;
+    bool sample = ((gpio_state >> INPUT_PIN_1) | (gpio_state >> INPUT_PIN_2)) & 1;
+
+    // Сохранение в буфер
+    if (sample_index < DMA_BUFFER_SIZE) {
+        dma_buffer_0[sample_index] = sample;
+        sample_index++;
+    } else {
+        sample_index = 0;
+        dma_buffer_ready[0] = true;
+    }
+
+    return true; // Продолжить повторение
+}
+
+// Проверка и обработка готовых данных в основном цикле
+void check_interrupt_data() {
+    // Проверка флагов готовности данных
+    if (dma_buffer_ready[0]) {
+        dma_buffer_ready[0] = false;
+
+        // Обработка буфера данных
+        process_buffer_data((uint8_t*)dma_buffer_0, DMA_BUFFER_SIZE);
+    }
+
+    // Проверка завершенных пакетов
+    static uint32_t last_bit_count = 0;
+    if (bit_count != last_bit_count && bit_count > 0) {
+        // Поиск преамбулы в накопленных данных
+        search_preamble_in_buffer();
+        last_bit_count = bit_count;
+    }
+}
+
+// Обработка буфера данных
+void process_buffer_data(uint8_t* buffer, uint32_t size) {
+    for (uint32_t i = 0; i < size; i++) {
+        if (bit_count < ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+            packet_bits[bit_count] = buffer[i];
+            bit_count++;
+        }
+    }
+}
+
+// Поиск преамбулы в буфере
+void search_preamble_in_buffer() {
+    for (int i = 0; i <= bit_count - PREAMBLE_LENGTH; i++) {
+        if (detect_preamble(packet_bits, i)) {
+            gpio_put(PREAMBLE_PIN_1, true);
+
+            // Обработка найденного пакета
+            process_packet_from_buffer(i);
+
+            gpio_put(PREAMBLE_PIN_1, false);
+            break;
+        }
+    }
+}
+
+
+Основные изменения для RP2040:
+
+Убран IRAM_ATTR - не нужен для RP2040
+Добавлен __isr - правильный атрибут для RP2040
+Использование __time_critical_func() - для критичных по времени функций
+RP2040 SDK функции - gpio_put, sio_hw->gpio_in, time_us_32()
+Таймер для регулярной выборки - альтернатива прерываниям по фронтам
+Быстрая обработка GPIO - прямой доступ к регистрам
+Минимизация работы в прерывании - основная обработка в главном цикле
+
+Эта версия оптимизирована специально для RP2040 и обеспечивает максимальную производительность при обработке высокоскоростных сигналов ADS-B.

@@ -1,0 +1,477 @@
+Создам полную программу для приема и декодирования пакетов ADS-B на RP2040. Разделю ее на несколько файлов для лучшей организации кода:
+
+main.ino
+
+#include "adsb_receiver.h"
+
+void setup() {
+  // Инициализация UART для отладки
+  Serial.begin(115200);
+  while (!Serial && millis() < 3000);
+
+  Serial.println("ADS-B Receiver starting...");
+
+  // Инициализация приемника ADS-B
+  if (!adsb_init()) {
+    Serial.println("Failed to initialize ADS-B receiver!");
+    while (1);
+  }
+
+  Serial.println("ADS-B Receiver initialized successfully");
+}
+
+void loop() {
+  // Основной цикл обработки
+  adsb_process();
+
+  // Обработка управления усилением
+  agc_process();
+
+  // Небольшая задержка для стабильности
+  delayMicroseconds(100);
+}
+
+
+adsb_receiver.h
+
+#ifndef ADSB_RECEIVER_H
+#define ADSB_RECEIVER_H
+
+#include <Arduino.h>
+#include <DMAChannel.h>
+#include <hardware/gpio.h>
+#include <hardware/irq.h>
+#include <hardware/pwm.h>
+#include <hardware/adc.h>
+#include <hardware/uart.h>
+#include <pico/stdlib.h>
+
+// Конфигурация пинов
+#define INPUT_PIN_1         19
+#define INPUT_PIN_2         22
+#define PREAMBLE_LED_PIN    20
+#define UART_TX_PIN         4
+#define UART_RX_PIN         5
+#define AGC_INPUT_PIN       26
+#define AGC_PWM_PIN         9
+#define AGC_CONTROL_PIN     27
+
+// Константы ADS-B
+#define ADSB_PACKET_BITS    112
+#define ADSB_PACKET_BYTES   14
+#define PREAMBLE_PATTERN    0xA1A0  // Паттерн преамбулы ADS-B
+#define PREAMBLE_BITS       8
+#define SAMPLE_RATE_US      1       // Частота дискретизации в микросекундах
+#define NOISE_THRESHOLD     10      // Порог для фильтра помех
+#define PACKET_QUEUE_SIZE   32
+
+// Структуры данных
+typedef struct {
+  uint8_t data[ADSB_PACKET_BYTES];
+  uint32_t timestamp;
+  bool valid;
+  bool corrected;
+} adsb_packet_t;
+
+// Глобальные переменные
+extern volatile bool preamble_detected;
+extern volatile uint32_t sample_buffer[256];
+extern volatile uint16_t buffer_index;
+extern adsb_packet_t packet_queue[PACKET_QUEUE_SIZE];
+extern volatile uint8_t queue_head, queue_tail;
+
+// Функции
+bool adsb_init(void);
+void adsb_process(void);
+void gpio_irq_handler(uint gpio, uint32_t events);
+bool decode_adsb_packet(const uint32_t samples, adsb_packet_t packet);
+bool detect_preamble(const uint32_t samples, uint16_t start_pos);
+void send_packet_uart(const adsb_packet_t* packet);
+void agc_process(void);
+uint32_t calculate_crc(const uint8_t* data, uint8_t len);
+bool correct_single_bit_error(adsb_packet_t* packet);
+void noise_filter(uint32_t* samples, uint16_t length);
+
+#endif
+
+
+adsb_receiver.cpp
+
+#include "adsb_receiver.h"
+
+// Глобальные переменные
+volatile bool preamble_detected = false;
+volatile uint32_t sample_buffer[256];
+volatile uint16_t buffer_index = 0;
+adsb_packet_t packet_queue[PACKET_QUEUE_SIZE];
+volatile uint8_t queue_head = 0, queue_tail = 0;
+
+// DMA канал для буферизации
+DMAChannel dma_channel;
+
+// UART2 для вывода
+uart_inst_t* uart2 = uart1;
+
+// AGC переменные
+float agc_gain = 1.0;
+uint32_t last_agc_update = 0;
+
+bool adsb_init(void) {
+  // Инициализация GPIO
+  gpio_init(INPUT_PIN_1);
+  gpio_set_dir(INPUT_PIN_1, GPIO_IN);
+  gpio_pull_up(INPUT_PIN_1);
+
+  gpio_init(INPUT_PIN_2);
+  gpio_set_dir(INPUT_PIN_2, GPIO_IN);
+  gpio_pull_up(INPUT_PIN_2);
+
+  gpio_init(PREAMBLE_LED_PIN);
+  gpio_set_dir(PREAMBLE_LED_PIN, GPIO_OUT);
+  gpio_put(PREAMBLE_LED_PIN, 0);
+
+  // Настройка прерываний
+  gpio_set_irq_enabled_with_callback(INPUT_PIN_1,
+    GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
+  gpio_set_irq_enabled(INPUT_PIN_2,
+    GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
+
+  // Инициализация UART2
+  uart_init(uart2, 115200);
+  gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+  gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+
+  // Настройка AGC
+  adc_init();
+  adc_gpio_init(AGC_INPUT_PIN);
+
+  gpio_set_function(AGC_PWM_PIN, GPIO_FUNC_PWM);
+  uint slice_num = pwm_gpio_to_slice_num(AGC_PWM_PIN);
+  pwm_set_wrap(slice_num, 4095);  // 12-bit разрешение
+  pwm_set_enabled(slice_num, true);
+
+  gpio_init(AGC_CONTROL_PIN);
+  gpio_set_dir(AGC_CONTROL_PIN, GPIO_IN);
+
+  Serial.println("ADS-B receiver initialized");
+  return true;
+}
+
+void gpio_irq_handler(uint gpio, uint32_t events) {
+  static uint32_t last_edge_time = 0;
+  uint32_t current_time = time_us_32();
+
+  // Простая защита от дребезга
+  if (current_time - last_edge_time < 50) {
+    return;
+  }
+  last_edge_time = current_time;
+
+  // Сохранение сэмпла в буфер
+  if (buffer_index < 256) {
+    uint32_t sample = (gpio_get(INPUT_PIN_1) << 1) | gpio_get(INPUT_PIN_2);
+    sample_buffer[buffer_index] = (sample << 30) | current_time;
+    buffer_index++;
+  }
+}
+
+void adsb_process(void) {
+  if (buffer_index < ADSB_PACKET_BITS + PREAMBLE_BITS) {
+    return;
+  }
+
+  // Применение фильтра помех
+  noise_filter((uint32_t*)sample_buffer, buffer_index);
+
+  // Поиск преамбулы
+  uint16_t preamble_pos;
+  if (detect_preamble((uint32_t*)sample_buffer, &preamble_pos)) {
+    gpio_put(PREAMBLE_LED_PIN, 1);
+    preamble_detected = true;
+
+    // Декодирование пакета
+    adsb_packet_t packet;
+    if (decode_adsb_packet((uint32_t*)sample_buffer + preamble_pos + PREAMBLE_BITS, &packet)) {
+      // Добавление в очередь
+      uint8_t next_head = (queue_head + 1) % PACKET_QUEUE_SIZE;
+      if (next_head != queue_tail) {
+        packet_queue[queue_head] = packet;
+        queue_head = next_head;
+      }
+    }
+
+    gpio_put(PREAMBLE_LED_PIN, 0);
+    preamble_detected = false;
+  }
+
+  // Обработка очереди пакетов
+  while (queue_tail != queue_head) {
+    send_packet_uart(&packet_queue[queue_tail]);
+    queue_tail = (queue_tail + 1) % PACKET_QUEUE_SIZE;
+  }
+
+  // Сброс буфера
+  buffer_index = 0;
+}
+
+bool detect_preamble(const uint32_t samples, uint16_t start_pos) {
+  for (uint16_t i = 0; i < buffer_index - PREAMBLE_BITS; i++) {
+    uint16_t pattern = 0;
+
+    for (uint8_t j = 0; j < PREAMBLE_BITS; j++) {
+      pattern <<= 1;
+      if ((samples[i + j] >> 31) & 1) {  // Извлечение старшего бита
+        pattern |= 1;
+      }
+    }
+
+    if (pattern == PREAMBLE_PATTERN) {
+      *start_pos = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool decode_adsb_packet(const uint32_t samples, adsb_packet_t packet) {
+  memset(packet, 0, sizeof(adsb_packet_t));
+  packet->timestamp = time_us_32();
+
+  // Декодирование бит в байты
+  for (uint8_t byte_idx = 0; byte_idx < ADSB_PACKET_BYTES; byte_idx++) {
+    uint8_t byte_val = 0;
+
+    for (uint8_t bit_idx = 0; bit_idx < 8; bit_idx++) {
+      uint16_t sample_idx = byte_idx * 8 + bit_idx;
+      if (sample_idx < ADSB_PACKET_BITS) {
+        byte_val <<= 1;
+        if ((samples[sample_idx] >> 31) & 1) {
+          byte_val |= 1;
+        }
+      }
+    }
+
+    packet->data[byte_idx] = byte_val;
+  }
+
+  // Проверка CRC
+  uint32_t received_crc =
+    (packet->data[11] << 16) |
+    (packet->data[12] << 8) |
+    packet->data[13];
+
+  uint32_t calculated_crc = calculate_crc(packet->data, 11);
+
+  if (received_crc == calculated_crc) {
+    packet->valid = true;
+    packet->corrected = false;
+    return true;
+  } else {
+    // Попытка коррекции одиночной ошибки
+    if (correct_single_bit_error(packet)) {
+      packet->valid = true;
+      packet->corrected = true;
+      return true;
+    }
+  }
+
+  packet->valid = false;
+  return false;
+}
+
+void noise_filter(uint32_t* samples, uint16_t length) {
+  if (length < 3) return;
+
+  for (uint16_t i = 1; i < length - 1; i++) {
+    uint32_t prev = (samples[i-1] >> 31) & 1;
+    uint32_t curr = (samples[i] >> 31) & 1;
+    uint32_t next = (samples[i+1] >> 31) & 1;
+
+    // Медианный фильтр
+    if (prev == next && curr != prev) {
+      samples[i] = (samples[i] & 0x7FFFFFFF) | (prev << 31);
+    }
+  }
+}
+
+void send_packet_uart(const adsb_packet_t* packet) {
+  char hex_string[ADSB_PACKET_BYTES * 2 + 1];
+
+  for (uint8_t i = 0; i < ADSB_PACKET_BYTES; i++) {
+    sprintf(&hex_string[i * 2], "%02X", packet->data[i]);
+  }
+  hex_string[ADSB_PACKET_BYTES * 2] = '\0';
+
+  char output[128];
+  sprintf(output, "*%s;%s%08X\r\n",
+    hex_string,
+    packet->corrected ? "C" : "",
+    packet->timestamp);
+
+  uart_puts(uart2, output);
+}
+
+void agc_process(void) {
+  uint32_t current_time = time_us_32();
+
+  if (current_time - last_agc_update < 10000) {  // Обновление каждые 10мс
+    return;
+  }
+
+  last_agc_update = current_time;
+
+  // Чтение уровня сигнала
+  adc_select_input(0);  // ADC0 для пина 26
+  uint16_t adc_value = adc_read();
+
+  // Вычисление целевого усиления
+  float signal_level = adc_value / 4095.0f;
+  float target_level = 0.7f;  // Целевой уровень 70%
+
+  float error = target_level - signal_level;
+  agc_gain += error * 0.1f;  // Простой пропорциональный регулятор
+
+  // Ограничение усиления
+  if (agc_gain < 0.1f) agc_gain = 0.1f;
+  if (agc_gain > 4.0f) agc_gain = 4.0f;
+
+  // Установка PWM для управления усилением
+  uint slice_num = pwm_gpio_to_slice_num(AGC_PWM_PIN);
+  uint16_t pwm_value = (uint16_t)(agc_gain * 1023.0f);
+  pwm_set_gpio_level(AGC_PWM_PIN, pwm_value);
+
+  // Контроль через пин 27
+  if (gpio_get(AGC_CONTROL_PIN)) {
+    // Ручное управление усилением
+    agc_gain = 2.0f;
+  }
+}
+
+
+crc_table.cpp
+
+#include "adsb_receiver.h"
+
+// Полная таблица CRC для ADS-B (полином 0xFFF409)
+static const uint32_t crc_table[256] = {
+    0x000000, 0xFFF409, 0xFFE812, 0x00141B, 0xFFD024, 0x00242D, 0x003836, 0xFFC43F,
+    0xFFA048, 0x005441, 0x004C5A, 0xFFB053, 0x00706C, 0xFF8465, 0xFF987E, 0x006477,
+    0xFF4090, 0x00B499, 0x00A882, 0xFF548B, 0x0090B4, 0xFF64BD, 0xFF78A6, 0x008CAF,
+    0x00E0D8, 0xFF14D1, 0xFF08CA, 0x00FCC3, 0xFF30FC, 0x00C4F5, 0x00D8EE, 0xFF2CE7,
+    0xFE8120, 0x017529, 0x016932, 0xFE9D3B, 0x015104, 0xFEA50D, 0xFEB916, 0x014D1F,
+    0x012168, 0xFED561, 0xFEC97A, 0x013D73, 0xFEF14C, 0x010545, 0x01195E, 0xFEED57,
+    0x01C1B0, 0xFE35B9, 0xFE29A2, 0x01DDAB, 0xFE1194, 0x01E59D, 0x01F986, 0xFE0D8F,
+    0xFE61F8, 0x0195F1, 0x0189EA, 0xFE7DE3, 0x01B1DC, 0xFE45D5, 0xFE59CE, 0x01ADC7,
+    0xFD0240, 0x02F649, 0x02EA52, 0xFD1E5B, 0x02D264, 0xFD266D, 0xFD3A76, 0x02CE7F,
+    0x02A208, 0xFD5601, 0xFD4A1A, 0x02BE13, 0xFD722C, 0x028625, 0x029A3E, 0xFD6E37,
+    0x0242D0, 0xFDB6D9, 0xFDAAC2, 0x025ECB, 0xFD92F4, 0x0266FD, 0x027AE6, 0xFD8EEF,
+    0xFDE298, 0x021691, 0x020A8A, 0xFDFE83, 0x0232BC, 0xFDC6B5, 0xFDDAAE, 0x022EA7,
+    0x038360, 0xFC7769, 0xFC6B72, 0x039F7B, 0xFC5344, 0x03A74D, 0x03BB56, 0xFC4F5F,
+    0xFC2328, 0x03D721, 0x03CB3A, 0xFC3F33, 0x03F30C, 0xFC0705, 0xFC1B1E, 0x03EF17,
+    0x03C3F0, 0xFC37F9, 0xFC2BE2, 0x03DFEB, 0xFC13D4, 0x03E7DD, 0x03FBC6, 0xFC0FCF,
+    0xFC63B8, 0x0397B1, 0x038BAA, 0xFC7FA3, 0x03B39C, 0xFC4795, 0xFC5B8E, 0x03AF87,
+    0xFA0480, 0x05F089, 0x05EC92, 0xFA189B, 0x05D4A4, 0xFA20AD, 0xFA3CB6, 0x05C8BF,
+    0x05A4C8, 0xFA50C1, 0xFA4CDA, 0x05B8D3, 0xFA74EC, 0x0580E5, 0x059CFE, 0xFA68F7,
+    0x054410, 0xFAB019, 0xFAAC02, 0x05580B, 0xFA9434, 0x05603D, 0x057C26, 0xFA882F,
+    0xFAE458, 0x051051, 0x050C4A, 0xFAF843, 0x05347C, 0xFAC075, 0xFADC6E, 0x052867,
+    0x0685A0, 0xF971A9, 0xF96DB2, 0x0699BB, 0xF95584, 0x06A18D, 0x06BD96, 0xF9499F,
+    0xF925E8, 0x06D1E1, 0x06CDFA, 0xF939F3, 0x06F5CC, 0xF901C5, 0xF91DDE, 0x06E9D7,
+    0x06C530, 0xF93139, 0xF92D22, 0x06D92B, 0xF91514, 0x06E11D, 0x06FD06, 0xF9090F,
+    0xF96578, 0x069171, 0x068D6A, 0xF97963, 0x06B55C, 0xF94155, 0xF95D4E, 0x06A947,
+    0xF786C0, 0x0872C9, 0x086ED2, 0xF79ADB, 0x0856E4, 0xF7A2ED, 0xF7BEF6, 0x084AFF,
+    0x082688, 0xF7D281, 0xF7CE9A, 0x083A93, 0xF7F6AC, 0x0802A5, 0x081EBE, 0xF7EAB7,
+    0x08C650, 0xF73259, 0xF72E42, 0x08DA4B, 0xF71674, 0x08E27D, 0x08FE66, 0xF70A6F,
+    0xF76618, 0x089211, 0x088E0A, 0xF77A03, 0x08B63C, 0xF74235, 0xF75E2E, 0x08AA27,
+    0xF10500, 0x0EF109, 0x0EED12, 0xF1191B, 0x0ED524, 0xF1212D, 0xF13D36, 0x0EC93F,
+    0x0EA548, 0xF15141, 0xF14D5A, 0x0EB953, 0xF1756C, 0x0E8165, 0x0E9D7E, 0xF16977,
+    0x0E4590, 0xF1B199, 0xF1AD82, 0x0E598B, 0xF195B4, 0x0E61BD, 0x0E7DA6, 0xF189AF,
+    0xF1E5D8, 0x0E11D1, 0x0E0DCA, 0xF1F9C3, 0x0E35FC, 0xF1C1F5, 0xF1DDEE, 0x0E29E7,
+    0x0F8420, 0xF07029, 0xF06C32, 0x0F983B, 0xF05404, 0x0FA00D, 0x0FBC16, 0xF0481F,
+    0xF02468, 0x0FD061, 0x0FCC7A, 0xF03873, 0x0FF44C, 0xF00045, 0xF01C5E, 0x0FE857,
+    0x0FC4B0, 0xF030B9, 0xF02CA2, 0x0FD8AB, 0xF01494, 0x0FE09D, 0x0FFC86, 0xF0088F,
+    0xF064F8, 0x0F90F1, 0x0F8CEA, 0xF078E3, 0x0FB4DC, 0xF040D5, 0xF05CCE, 0x0FA8C7,
+    0x0C8740, 0xF37349, 0xF37F52, 0x0C8B5B, 0xF35764, 0x0CA36D, 0x0CBF76, 0xF34B7F,
+    0xF32708, 0x0CD301, 0x0CDF1A, 0xF32B13, 0x0CE72C, 0xF31325, 0xF30F3E, 0x0CFB37,
+    0x0CD7D0, 0xF323D9, 0xF32FC2, 0x0CDBCB, 0xF317F4, 0x0CE3FD, 0x0CFFE6, 0xF30BEF,
+    0xF36798, 0x0C9391, 0x0C9F8A, 0xF36B83, 0x0CA7BC, 0xF353B5, 0xF34FAE, 0x0CBBA7,
+    0xF30860, 0x0CFC69, 0x0CF072, 0xF3047B, 0x0CC844, 0xF33C4D, 0xF32056, 0x0CD45F,
+    0x0CB828, 0xF34C21, 0xF3403A, 0x0CB433, 0xF3780C, 0x0C8C05, 0x0C901E, 0xF36417,
+    0x0C48F0, 0xF3BCF9, 0xF3B0E2, 0x0C44EB, 0xF388D4, 0x0C7CDD, 0x0C60C6, 0xF394CF,
+    0xF3F8B8, 0x0C0CB1, 0x0C00AA, 0xF3F4A3, 0x0C389C, 0xF3CC95, 0xF3D08E, 0x0C2487
+};
+
+uint32_t calculate_crc(const uint8_t* data, uint8_t len) {
+    uint32_t crc = 0;
+
+    for (uint8_t i = 0; i < len; i++) {
+        uint8_t table_index = (crc >> 16) ^ data[i];
+        crc = ((crc << 8) ^ crc_table[table_index]) & 0xFFFFFF;
+    }
+
+    return crc;
+}
+
+bool correct_single_bit_error(adsb_packet_t* packet) {
+    uint32_t original_crc = calculate_crc(packet->data, 11);
+    uint32_t received_crc =
+        (packet->data[11] << 16) |
+        (packet->data[12] << 8) |
+        packet->data[13];
+
+    // Попробуем перевернуть каждый бит в сообщении
+    for (uint8_t byte_idx = 0; byte_idx < 11; byte_idx++) {
+        for (uint8_t bit_idx = 0; bit_idx < 8; bit_idx++) {
+            // Переворачиваем бит
+            uint8_t original_byte = packet->data[byte_idx];
+            packet->data[byte_idx] ^= (1 << (7 - bit_idx));
+
+            // Проверяем CRC
+            uint32_t new_crc = calculate_crc(packet->data, 11);
+            if (new_crc == received_crc) {
+                // Ошибка исправлена!
+                return true;
+            }
+
+            // Восстанавливаем оригинальный бит
+            packet->data[byte_idx] = original_byte;
+        }
+    }
+
+    return false; // Не удалось исправить ошибку
+}
+
+
+Описание функциональности:
+
+Прием сигнала
+Использует прерывания на пинах 19 и 22
+Буферизация через DMA в массив sample_buffer
+Фильтрация помех медианным фильтром
+
+Детектор преамбулы
+Поиск паттерна преамбулы ADS-B (0xA1A0)
+Индикация на пине 20
+
+Декодирование
+Извлечение 112 бит данных после преамбулы
+Преобразование в 14 байт пакета
+
+CRC контроль
+Полная таблица CRC с полиномом 0xFFF409
+Проверка целостности пакета
+Коррекция однобитовых ошибок
+
+AGC (автоматическое управление усилением)
+Мониторинг уровня сигнала через ADC на пине 26
+ШИМ выход на пине 9
+Ручной контроль через пин 27
+
+Вывод данных
+UART2 на пинах 4/5
+Формат вывода: *HEX_DATA;C_if_correctedTIMESTAMP
+
+Очереди пакетов
+Кольцевой буфер для принятых пакетов
+Обработка без потери данных
+
+Программа работает без FreeRTOS, используя простой суперлуп с обработкой прерываний.

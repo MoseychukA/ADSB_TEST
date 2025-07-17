@@ -1,0 +1,302 @@
+Вы правы, эта функция может вызвать проблемы в прерываниях из-за операций копирования и потенциальных блокировок. Вот оптимизированная версия для использования в прерываниях:
+
+
+// Оптимизированная структура очереди для прерываний
+struct FastPacketQueue {
+    volatile ADSBPacket packets[MAX_QUEUE_SIZE];
+    volatile uint8_t head;
+    volatile uint8_t tail;
+    volatile uint8_t count;
+    volatile bool overflow_flag;
+
+    FastPacketQueue() : head(0), tail(0), count(0), overflow_flag(false) {}
+};
+
+FastPacketQueue received_packets_fast;
+
+// Быстрое добавление пакета в прерывании (минимальные операции)
+inline bool add_received_packet_fast(const ADSBPacket* packet) {
+    // Проверка переполнения без блокировки
+    if (received_packets_fast.count >= MAX_QUEUE_SIZE) {
+        received_packets_fast.overflow_flag = true;
+        return false;
+    }
+
+    // Быстрое копирование данных
+    volatile ADSBPacket* dest = &received_packets_fast.packets[received_packets_fast.tail];
+
+    // Копируем только необходимые поля
+    dest->length = packet->length;
+    dest->timestamp = packet->timestamp;
+    dest->valid_crc = packet->valid_crc;
+    dest->error_corrected = packet->error_corrected;
+
+    // Быстрое копирование данных
+    for (int i = 0; i < packet->length && i < ADSB_LONG_PACKET_BYTES; i++) {
+        dest->data[i] = packet->data[i];
+    }
+
+    // Обновляем указатели
+    received_packets_fast.tail = (received_packets_fast.tail + 1) % MAX_QUEUE_SIZE;
+    received_packets_fast.count++;
+
+    return true;
+}
+
+// Еще более быстрая версия - только указатель на данные
+struct PacketReference {
+    uint8_t* data_ptr;
+    uint8_t length;
+    uint64_t timestamp;
+    bool valid_crc;
+    bool error_corrected;
+};
+
+#define MAX_PACKET_REFS 20
+volatile PacketReference packet_refs[MAX_PACKET_REFS];
+volatile uint8_t ref_head = 0;
+volatile uint8_t ref_tail = 0;
+volatile uint8_t ref_count = 0;
+
+// Супер-быстрая версия для прерываний - только ссылки
+inline bool add_packet_reference(uint8_t* data, uint8_t len, bool crc_valid) {
+    if (ref_count >= MAX_PACKET_REFS) {
+        return false;
+    }
+
+    volatile PacketReference* ref = &packet_refs[ref_tail];
+    ref->data_ptr = data;
+    ref->length = len;
+    ref->timestamp = time_us_64();
+    ref->valid_crc = crc_valid;
+    ref->error_corrected = false;
+
+    ref_tail = (ref_tail + 1) % MAX_PACKET_REFS;
+    ref_count++;
+
+    return true;
+}
+
+// Статические буферы для избежания динамического выделения
+#define PACKET_BUFFER_POOL_SIZE 10
+static ADSBPacket packet_buffer_pool[PACKET_BUFFER_POOL_SIZE];
+static volatile uint8_t buffer_pool_index = 0;
+static volatile bool buffers_in_use[PACKET_BUFFER_POOL_SIZE] = {false};
+
+// Получение свободного буфера для пакета
+ADSBPacket* get_free_packet_buffer() {
+    for (int i = 0; i < PACKET_BUFFER_POOL_SIZE; i++) {
+        uint8_t idx = (buffer_pool_index + i) % PACKET_BUFFER_POOL_SIZE;
+        if (!buffers_in_use[idx]) {
+            buffers_in_use[idx] = true;
+            buffer_pool_index = (idx + 1) % PACKET_BUFFER_POOL_SIZE;
+            return &packet_buffer_pool[idx];
+        }
+    }
+    return NULL; // Нет свободных буферов
+}
+
+// Освобождение буфера
+void free_packet_buffer(ADSBPacket* buffer) {
+    if (buffer >= packet_buffer_pool &&
+        buffer < packet_buffer_pool + PACKET_BUFFER_POOL_SIZE) {
+        int idx = buffer - packet_buffer_pool;
+        buffers_in_use[idx] = false;
+    }
+}
+
+// Очередь указателей на буферы (максимально быстро)
+static volatile ADSBPacket* packet_ptr_queue[MAX_QUEUE_SIZE];
+static volatile uint8_t ptr_queue_head = 0;
+static volatile uint8_t ptr_queue_tail = 0;
+static volatile uint8_t ptr_queue_count = 0;
+
+// Добавление указателя в очередь (для прерываний)
+inline bool add_packet_ptr_to_queue(ADSBPacket* packet) {
+    if (ptr_queue_count >= MAX_QUEUE_SIZE) {
+        return false;
+    }
+
+    packet_ptr_queue[ptr_queue_tail] = packet;
+    ptr_queue_tail = (ptr_queue_tail + 1) % MAX_QUEUE_SIZE;
+    ptr_queue_count++;
+
+    return true;
+}
+
+// Получение пакета из очереди указателей
+ADSBPacket* get_packet_from_queue() {
+    if (ptr_queue_count == 0) {
+        return NULL;
+    }
+
+    ADSBPacket packet = (ADSBPacket)packet_ptr_queue[ptr_queue_head];
+    ptr_queue_head = (ptr_queue_head + 1) % MAX_QUEUE_SIZE;
+    ptr_queue_count--;
+
+    return packet;
+}
+
+// Оптимизированная версия process_complete_packet для прерываний
+void process_complete_packet_isr(uint64_t timestamp) {
+    // Получаем свободный буфер
+    ADSBPacket* packet = get_free_packet_buffer();
+    if (!packet) {
+        // Нет свободных буферов
+        reset_packet_buffer();
+        return;
+    }
+
+    packet->timestamp = timestamp;
+
+    // Определяем длину пакета
+    int data_bits = bit_count - (bit_counter + PREAMBLE_LENGTH);
+    packet->length = data_bits / 16;
+
+    if (packet->length < 7 || packet->length > 14) {
+        free_packet_buffer(packet);
+        reset_packet_buffer();
+        return;
+    }
+
+    // Быстрое Manchester декодирование
+    if (manchester_decode_adsb(&packet_bits[bit_counter + PREAMBLE_LENGTH],
+                              packet->data, data_bits)) {
+
+        // Быстрая проверка CRC (можно отложить)
+        packet->valid_crc = verify_crc(packet->data, packet->length);
+        packet->error_corrected = false;
+
+        // Добавляем в очередь указателей
+        if (!add_packet_ptr_to_queue(packet)) {
+            // Очередь переполнена
+            free_packet_buffer(packet);
+        }
+    } else {
+        free_packet_buffer(packet);
+    }
+
+    reset_packet_buffer();
+}
+
+// Обработка пакетов в основном цикле
+void process_received_packets_optimized() {
+    static uint32_t processed_count = 0;
+    int packets_this_call = 0;
+    const int max_per_call = 3;
+
+    while (packets_this_call < max_per_call) {
+        ADSBPacket* packet = get_packet_from_queue();
+        if (!packet) break;
+
+        packets_this_call++;
+        processed_count++;
+
+        if (packet->valid_crc) {
+            // Возможная дополнительная коррекция ошибок здесь
+            if (!packet->valid_crc) {
+                uint8_t backup_data[ADSB_LONG_PACKET_BYTES];
+                memcpy(backup_data, packet->data, packet->length);
+
+                if (correct_single_bit_error(packet->data, packet->length)) {
+                    packet->valid_crc = true;
+                    packet->error_corrected = true;
+                } else {
+                    memcpy(packet->data, backup_data, packet->length);
+                }
+            }
+
+            if (packet->valid_crc) {
+                DecodedADSB decoded = decode_adsb_packet(*packet);
+
+                if (decoded.valid) {
+                    send_decoded_packet_uart(decoded, *packet);
+                }
+            }
+        }
+
+        // Освобождаем буфер
+        free_packet_buffer(packet);
+    }
+
+    // Проверка переполнения
+    if (received_packets_fast.overflow_flag) {
+        received_packets_fast.overflow_flag = false;
+        Serial.println("Packet queue overflow detected");
+    }
+}
+
+// Простейшая версия для критически важных прерываний
+volatile uint8_t simple_packet_buffer[ADSB_LONG_PACKET_BYTES * 4]; // 4 пакета
+volatile uint8_t simple_buffer_write_pos = 0;
+volatile uint8_t simple_buffer_read_pos = 0;
+volatile bool simple_buffer_ready = false;
+
+// Минимальная запись в прерывании
+inline void store_packet_simple(uint8_t* data, uint8_t length) {
+    if (simple_buffer_write_pos + length + 1 >= sizeof(simple_packet_buffer)) {
+        simple_buffer_write_pos = 0; // Wrap around
+    }
+
+    simple_packet_buffer[simple_buffer_write_pos++] = length;
+    for (int i = 0; i < length; i++) {
+        simple_packet_buffer[simple_buffer_write_pos++] = data[i];
+    }
+    simple_buffer_ready = true;
+}
+
+// Чтение из основного цикла
+bool read_packet_simple(uint8_t data, uint8_t length) {
+    if (!simple_buffer_ready || simple_buffer_read_pos >= simple_buffer_write_pos) {
+        return false;
+    }
+
+    *length = simple_packet_buffer[simple_buffer_read_pos++];
+    for (int i = 0; i < *length; i++) {
+        data[i] = simple_packet_buffer[simple_buffer_read_pos++];
+    }
+
+    if (simple_buffer_read_pos >= simple_buffer_write_pos) {
+        simple_buffer_ready = false;
+        simple_buffer_read_pos = 0;
+        simple_buffer_write_pos = 0;
+    }
+
+    return true;
+}
+
+// Инициализация оптимизированной системы
+void init_optimized_packet_system() {
+    // Инициализация пула буферов
+    for (int i = 0; i < PACKET_BUFFER_POOL_SIZE; i++) {
+        buffers_in_use[i] = false;
+    }
+
+    // Сброс очередей
+    ptr_queue_head = 0;
+    ptr_queue_tail = 0;
+    ptr_queue_count = 0;
+
+    ref_head = 0;
+    ref_tail = 0;
+    ref_count = 0;
+
+    simple_buffer_write_pos = 0;
+    simple_buffer_read_pos = 0;
+    simple_buffer_ready = false;
+
+    Serial.println("Optimized packet system initialized");
+}
+
+
+Ключевые оптимизации для прерываний:
+
+Пул статических буферов - избегаем динамического выделения памяти
+Очередь указателей - передаем только указатели, не копируем данные
+Минимальные операции в ISR - откладываем тяжелую обработку
+Inline функции - уменьшаем накладные расходы
+Volatile переменные - корректная работа с прерываниями
+Простой буфер - для критически важных случаев
+Быстрые проверки - минимум логики в прерывании
+
+Эта система гораздо более подходит для использования в прерываниях на микроконтроллерах.

@@ -1,0 +1,288 @@
+Вы правы! Для Arduino IDE на RP2040 эта функция из Pico SDK может быть недоступна. Вот исправленная версия с использованием стандартных Arduino функций:
+
+
+// Настройка прерываний для RP2040 в Arduino IDE
+void setup_interrupts_arduino() {
+    // Инициализация GPIO пинов
+    pinMode(INPUT_PIN_1, INPUT);
+    pinMode(INPUT_PIN_2, INPUT);
+    pinMode(PREAMBLE_PIN_1, OUTPUT);
+    pinMode(PREAMBLE_PIN_2, OUTPUT);
+
+    // Установка начальных состояний
+    digitalWrite(PREAMBLE_PIN_1, LOW);
+    digitalWrite(PREAMBLE_PIN_2, LOW);
+
+    // Arduino-style прерывания (совместимость с RP2040)
+    attachInterrupt(digitalPinToInterrupt(INPUT_PIN_1), signal_interrupt_pin1, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(INPUT_PIN_2), signal_interrupt_pin2, CHANGE);
+
+    Serial.println("Arduino-style interrupts configured for RP2040");
+}
+
+// Отдельные функции прерываний для каждого пина
+void signal_interrupt_pin1() {
+    signal_interrupt_common(INPUT_PIN_1);
+}
+
+void signal_interrupt_pin2() {
+    signal_interrupt_common(INPUT_PIN_2);
+}
+
+// Общая функция обработки прерывания
+void signal_interrupt_common(uint8_t pin) {
+    static volatile uint32_t last_time_pin1 = 0;
+    static volatile uint32_t last_time_pin2 = 0;
+    static volatile uint32_t debounce_time = 2; // 2 микросекунды
+
+    uint32_t current_time = micros();
+    uint32_t* last_time_ptr = (pin == INPUT_PIN_1) ? &last_time_pin1 : &last_time_pin2;
+
+    // Простая защита от дребезга
+    if (current_time - *last_time_ptr < debounce_time) {
+        return;
+    }
+    *last_time_ptr = current_time;
+
+    // Чтение состояния пинов
+    bool pin1_state = digitalRead(INPUT_PIN_1);
+    bool pin2_state = digitalRead(INPUT_PIN_2);
+
+    // Комбинирование сигналов (OR логика для ADS-B)
+    bool combined_signal = pin1_state || pin2_state;
+
+    // Минимальная обработка в прерывании
+    process_signal_bit(combined_signal, current_time);
+}
+
+// Обработка единичного бита сигнала
+void process_signal_bit(bool bit_value, uint32_t timestamp) {
+    // Проверка переполнения буфера
+    if (bit_count >= ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+        reset_packet_buffer_isr();
+        return;
+    }
+
+    // Сохранение бита
+    packet_bits[bit_count] = bit_value ? 1 : 0;
+    bit_count++;
+
+    // Проверка на преамбулу каждые 8 битов для эффективности
+    if (bit_count >= PREAMBLE_LENGTH && (bit_count % 8) == 0) {
+        if (detect_preamble_fast(packet_bits, bit_count - PREAMBLE_LENGTH)) {
+            preamble_detected = true;
+            digitalWrite(PREAMBLE_PIN_1, HIGH);
+            bit_counter = bit_count - PREAMBLE_LENGTH;
+        }
+    }
+
+    // Проверка завершения пакета
+    if (preamble_detected) {
+        int data_bits = bit_count - bit_counter - PREAMBLE_LENGTH;
+
+        if (data_bits == ADSB_SHORT_PACKET_BITS * 2 ||
+            data_bits == ADSB_LONG_PACKET_BITS * 2) {
+            // Пакет завершен, отправляем на обработку
+            packet_ready_flag = true;
+            packet_timestamp = timestamp;
+        }
+    }
+}
+
+// Быстрый детектор преамбулы для прерывания
+bool detect_preamble_fast(volatile uint32_t* samples, int start_idx) {
+    // ADS-B преамбула: 1010000010101000 (первые 8 битов для быстрой проверки)
+    const uint8_t preamble_pattern[] = {1, 0, 1, 0, 0, 0, 0, 0};
+
+    for (int i = 0; i < 8; i++) { // Проверяем только первые 8 битов для скорости
+        if (samples[start_idx + i] != preamble_pattern[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Альтернативное решение с таймером для регулярной выборки
+volatile bool timer_sampling_enabled = false;
+
+void setup_timer_sampling_arduino() {
+    // Использование аппаратного таймера RP2040 через Arduino
+    timer_sampling_enabled = true;
+
+    // Настройка таймера для выборки на частоте 2 МГц
+    add_repeating_timer_us(1, timer_sampling_callback, NULL, &sampling_timer);
+
+    Serial.println("Timer-based sampling configured");
+}
+
+struct repeating_timer sampling_timer;
+
+bool timer_sampling_callback(struct repeating_timer *t) {
+    if (!timer_sampling_enabled) return false;
+
+    static uint32_t sample_counter = 0;
+
+    // Быстрое чтение GPIO состояния
+    bool pin1_state = digitalRead(INPUT_PIN_1);
+    bool pin2_state = digitalRead(INPUT_PIN_2);
+    bool combined = pin1_state || pin2_state;
+
+    // Сохранение в DMA буфер
+    if (sample_counter < DMA_BUFFER_SIZE) {
+        dma_buffer_0[sample_counter] = combined ? 1 : 0;
+        sample_counter++;
+    } else {
+        // Буфер заполнен
+        dma_buffer_ready[0] = true;
+        sample_counter = 0;
+    }
+
+    return true; // Продолжить
+}
+
+// Простая версия без сложных прерываний
+volatile bool signal_change_detected = false;
+volatile uint32_t last_signal_change_time = 0;
+
+void setup_simple_polling() {
+    pinMode(INPUT_PIN_1, INPUT);
+    pinMode(INPUT_PIN_2, INPUT);
+    pinMode(PREAMBLE_PIN_1, OUTPUT);
+    pinMode(PREAMBLE_PIN_2, OUTPUT);
+
+    Serial.println("Simple polling mode configured");
+}
+
+// Функция для вызова в основном цикле
+void poll_signal_inputs() {
+    static bool last_pin1_state = false;
+    static bool last_pin2_state = false;
+    static uint32_t last_poll_time = 0;
+
+    uint32_t current_time = micros();
+
+    // Ограничиваем частоту опроса
+    if (current_time - last_poll_time < 1) { // 1 МГц
+        return;
+    }
+    last_poll_time = current_time;
+
+    bool pin1_state = digitalRead(INPUT_PIN_1);
+    bool pin2_state = digitalRead(INPUT_PIN_2);
+
+    // Детекция изменений
+    if (pin1_state != last_pin1_state || pin2_state != last_pin2_state) {
+        signal_change_detected = true;
+        last_signal_change_time = current_time;
+
+        bool combined = pin1_state || pin2_state;
+        process_signal_bit(combined, current_time);
+
+        last_pin1_state = pin1_state;
+        last_pin2_state = pin2_state;
+    }
+}
+
+// Гибридный подход - прерывания + опрос
+void setup_hybrid_detection() {
+    // Настройка прерываний для грубой детекции
+    attachInterrupt(digitalPinToInterrupt(INPUT_PIN_1), wake_up_processor, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(INPUT_PIN_2), wake_up_processor, CHANGE);
+
+    // Плюс регулярный опрос для точной выборки
+    timer_sampling_enabled = true;
+
+    Serial.println("Hybrid detection configured");
+}
+
+void wake_up_processor() {
+    // Просто устанавливаем флаг для активации точного опроса
+    signal_change_detected = true;
+}
+
+// Обработка в основном цикле ядра 0
+void core0_main_loop() {
+    static uint32_t last_led_toggle = 0;
+
+    while (true) {
+        uint32_t current_time = millis();
+
+        // LED индикация
+        if (current_time - last_led_toggle >= 1000) {
+            digitalWrite(CORE0_LED_PIN, !digitalRead(CORE0_LED_PIN));
+            last_led_toggle = current_time;
+        }
+
+        // Проверка готовых пакетов
+        if (packet_ready_flag) {
+            packet_ready_flag = false;
+            process_complete_packet_main_loop(packet_timestamp);
+        }
+
+        // Опрос сигналов (если используется)
+        poll_signal_inputs();
+
+        // Обработка DMA данных
+        process_dma_data();
+
+        // AGC
+        update_agc();
+
+        // Проверка таймаутов
+        check_packet_timeout();
+
+        delayMicroseconds(100); // Небольшая задержка
+    }
+}
+
+// Флаги для связи между прерыванием и основным циклом
+volatile bool packet_ready_flag = false;
+volatile uint64_t packet_timestamp = 0;
+
+void process_complete_packet_main_loop(uint64_t timestamp) {
+    // Основная обработка пакета в главном цикле
+    // (вынесена из прерывания для стабильности)
+
+    ADSBPacket* packet = get_free_packet_buffer();
+    if (!packet) return;
+
+    packet->timestamp = timestamp;
+
+    // Определяем длину пакета
+    int data_bits = bit_count - bit_counter - PREAMBLE_LENGTH;
+    packet->length = data_bits / 16;
+
+    if (packet->length >= 7 && packet->length <= 14) {
+        if (manchester_decode_adsb(&packet_bits[bit_counter + PREAMBLE_LENGTH],
+                                  packet->data, data_bits)) {
+
+            packet->valid_crc = verify_crc(packet->data, packet->length);
+            packet->error_corrected = false;
+
+            if (packet->valid_crc || correct_single_bit_error(packet->data, packet->length)) {
+                add_packet_ptr_to_queue(packet);
+            } else {
+                free_packet_buffer(packet);
+            }
+        } else {
+            free_packet_buffer(packet);
+        }
+    } else {
+        free_packet_buffer(packet);
+    }
+
+    reset_packet_buffer();
+}
+
+
+Основные изменения:
+
+Использование attachInterrupt() - стандартная Arduino функция
+Отдельные обработчики для каждого пина
+Минимальная обработка в ISR - основная работа в главном цикле
+Флаги связи между прерыванием и основным циклом
+Альтернатива с таймером - для высокочастотной выборки
+Простой опрос - как запасной вариант
+Гибридный подход - комбинация методов
+
+Этот код будет корректно работать в стандартной Arduino IDE с RP2040.

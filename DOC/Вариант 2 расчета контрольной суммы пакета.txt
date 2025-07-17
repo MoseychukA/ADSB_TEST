@@ -1,0 +1,24 @@
+byte calculateChecksum(byte* data, int length) {
+    byte checksum = 0;
+    for (int i = 0; i < length; i++) {
+        checksum += data[i];
+    }
+    return checksum;
+}
+
+void setup() {
+    Serial.begin(9600);
+    
+    // Пример пакета ADS-B (можете заменить на ваши данные)
+    byte packet[] = {0x8D, 0x44, 0x00, 0x20, 0x06, 0x00, 0x04, 0x00, 0x00, 0x00};
+    int length = sizeof(packet) / sizeof(packet[0]);
+
+    byte checksum = calculateChecksum(packet, length);
+    
+    Serial.print("Контрольная сумма: ");
+    Serial.println(checksum, HEX);
+}
+
+void loop() {
+    // Ваш основной код
+}

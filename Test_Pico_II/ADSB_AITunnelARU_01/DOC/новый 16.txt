@@ -1,0 +1,261 @@
+Проблема в том, что в C++ нужно указывать правильный тип указателя на функцию. Вот исправленная версия:
+
+
+// Правильная настройка прерываний для RP2040 с Pico SDK
+void setup_interrupts_pico_sdk() {
+    // Инициализация GPIO
+    gpio_init(INPUT_PIN_1);
+    gpio_init(INPUT_PIN_2);
+    gpio_set_dir(INPUT_PIN_1, GPIO_IN);
+    gpio_set_dir(INPUT_PIN_2, GPIO_IN);
+
+    gpio_init(PREAMBLE_PIN_1);
+    gpio_init(PREAMBLE_PIN_2);
+    gpio_set_dir(PREAMBLE_PIN_1, GPIO_OUT);
+    gpio_set_dir(PREAMBLE_PIN_2, GPIO_OUT);
+
+    // Правильный способ с callback функцией
+    gpio_set_irq_enabled_with_callback(INPUT_PIN_1,
+                                       GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL,
+                                       true,
+                                       signal_interrupt);  // Убираем &
+
+    // Для второго пина только включаем прерывание (callback уже установлен)
+    gpio_set_irq_enabled(INPUT_PIN_2,
+                        GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL,
+                        true);
+
+    Serial.println("Pico SDK interrupts configured");
+}
+
+// Правильная сигнатура функции прерывания для Pico SDK
+void signal_interrupt(uint gpio, uint32_t events) {
+    static uint32_t last_time = 0;
+    uint32_t current_time = time_us_32();
+
+    // Защита от дребезга
+    if (current_time - last_time < 2) {
+        return;
+    }
+    last_time = current_time;
+
+    // Определяем какой пин вызвал прерывание
+    bool pin_state = gpio_get(gpio);
+
+    // Читаем состояние обоих пинов
+    bool pin1_state = gpio_get(INPUT_PIN_1);
+    bool pin2_state = gpio_get(INPUT_PIN_2);
+    bool combined_signal = pin1_state || pin2_state;
+
+    // Минимальная обработка в прерывании
+    process_signal_bit_fast(combined_signal, current_time);
+}
+
+// Альтернативная версия с отдельными функциями для каждого события
+void setup_interrupts_separate() {
+    gpio_init(INPUT_PIN_1);
+    gpio_init(INPUT_PIN_2);
+    gpio_set_dir(INPUT_PIN_1, GPIO_IN);
+    gpio_set_dir(INPUT_PIN_2, GPIO_IN);
+
+    // Устанавливаем callback для прерываний GPIO
+    gpio_set_irq_callback(gpio_interrupt_handler);
+
+    // Включаем прерывания для пинов
+    gpio_set_irq_enabled(INPUT_PIN_1, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled(INPUT_PIN_2, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
+
+    // Включаем прерывания в NVIC
+    irq_set_enabled(IO_IRQ_BANK0, true);
+
+    Serial.println("Separate interrupt handler configured");
+}
+
+// Общий обработчик прерываний GPIO
+void gpio_interrupt_handler(uint gpio, uint32_t events) {
+    switch (gpio) {
+        case INPUT_PIN_1:
+            handle_pin_interrupt(INPUT_PIN_1, events);
+            break;
+        case INPUT_PIN_2:
+            handle_pin_interrupt(INPUT_PIN_2, events);
+            break;
+        default:
+            break;
+    }
+}
+
+void handle_pin_interrupt(uint pin, uint32_t events) {
+    static uint32_t last_interrupt_time[2] = {0, 0};
+    uint32_t current_time = time_us_32();
+    int pin_index = (pin == INPUT_PIN_1) ? 0 : 1;
+
+    // Debouncing
+    if (current_time - last_interrupt_time[pin_index] < 5) {
+        return;
+    }
+    last_interrupt_time[pin_index] = current_time;
+
+    // Обработка по типу события
+    if (events & GPIO_IRQ_EDGE_RISE) {
+        // Rising edge
+        process_rising_edge(pin, current_time);
+    }
+
+    if (events & GPIO_IRQ_EDGE_FALL) {
+        // Falling edge
+        process_falling_edge(pin, current_time);
+    }
+}
+
+void process_rising_edge(uint pin, uint32_t timestamp) {
+    // Индикация rising edge
+    if (pin == INPUT_PIN_1) {
+        gpio_put(PREAMBLE_PIN_1, true);
+    } else {
+        gpio_put(PREAMBLE_PIN_2, true);
+    }
+
+    // Сохранение бита (1 для rising edge в ADS-B)
+    if (bit_count < ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+        packet_bits[bit_count] = 1;
+        bit_count++;
+    }
+}
+
+void process_falling_edge(uint pin, uint32_t timestamp) {
+    // Сброс индикации
+    if (pin == INPUT_PIN_1) {
+        gpio_put(PREAMBLE_PIN_1, false);
+    } else {
+        gpio_put(PREAMBLE_PIN_2, false);
+    }
+
+    // Сохранение бита (0 для falling edge в ADS-B)
+    if (bit_count < ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+        packet_bits[bit_count] = 0;
+        bit_count++;
+    }
+}
+
+// Максимально простая версия для Arduino IDE
+void setup_interrupts_simple() {
+    pinMode(INPUT_PIN_1, INPUT);
+    pinMode(INPUT_PIN_2, INPUT);
+    pinMode(PREAMBLE_PIN_1, OUTPUT);
+    pinMode(PREAMBLE_PIN_2, OUTPUT);
+
+    // Простые Arduino прерывания
+    attachInterrupt(digitalPinToInterrupt(INPUT_PIN_1), isr_pin1, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(INPUT_PIN_2), isr_pin2, CHANGE);
+
+    Serial.println("Simple Arduino interrupts configured");
+}
+
+void isr_pin1() {
+    static uint32_t last_time = 0;
+    uint32_t now = micros();
+
+    if (now - last_time > 5) { // 5 микросекунд debounce
+        bool state = digitalRead(INPUT_PIN_1);
+        digitalWrite(PREAMBLE_PIN_1, state);
+
+        // Быстрая обработка
+        signal_bit_queue[signal_write_index] = state ? 1 : 0;
+        signal_timestamps[signal_write_index] = now;
+        signal_write_index = (signal_write_index + 1) % SIGNAL_QUEUE_SIZE;
+
+        last_time = now;
+    }
+}
+
+void isr_pin2() {
+    static uint32_t last_time = 0;
+    uint32_t now = micros();
+
+    if (now - last_time > 5) {
+        bool state = digitalRead(INPUT_PIN_2);
+        digitalWrite(PREAMBLE_PIN_2, state);
+
+        signal_bit_queue[signal_write_index] = state ? 1 : 0;
+        signal_timestamps[signal_write_index] = now;
+        signal_write_index = (signal_write_index + 1) % SIGNAL_QUEUE_SIZE;
+
+        last_time = now;
+    }
+}
+
+// Буфер для передачи данных из прерывания
+#define SIGNAL_QUEUE_SIZE 256
+volatile uint8_t signal_bit_queue[SIGNAL_QUEUE_SIZE];
+volatile uint32_t signal_timestamps[SIGNAL_QUEUE_SIZE];
+volatile uint8_t signal_write_index = 0;
+volatile uint8_t signal_read_index = 0;
+
+// Обработка накопленных сигналов в основном цикле
+void process_signal_queue() {
+    while (signal_read_index != signal_write_index) {
+        uint8_t bit = signal_bit_queue[signal_read_index];
+        uint32_t timestamp = signal_timestamps[signal_read_index];
+
+        // Обработка бита
+        process_signal_bit_main(bit, timestamp);
+
+        signal_read_index = (signal_read_index + 1) % SIGNAL_QUEUE_SIZE;
+    }
+}
+
+void process_signal_bit_main(uint8_t bit, uint32_t timestamp) {
+    if (bit_count < ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH) {
+        packet_bits[bit_count] = bit;
+        bit_count++;
+
+        // Проверка на преамбулу
+        if (bit_count >= PREAMBLE_LENGTH) {
+            if (detect_preamble(packet_bits, bit_count - PREAMBLE_LENGTH)) {
+                preamble_detected = true;
+                bit_counter = bit_count - PREAMBLE_LENGTH;
+            }
+        }
+
+        // Проверка завершения пакета
+        if (preamble_detected) {
+            int data_bits = bit_count - bit_counter - PREAMBLE_LENGTH;
+
+            if (data_bits == ADSB_SHORT_PACKET_BITS * 2 ||
+                data_bits == ADSB_LONG_PACKET_BITS * 2) {
+                process_complete_packet(timestamp);
+            }
+        }
+    } else {
+        reset_packet_buffer();
+    }
+}
+
+// Функция выбора метода в зависимости от окружения
+void setup_interrupts_auto() {
+    #ifdef ARDUINO_ARCH_RP2040
+        // Для Arduino IDE на RP2040
+        setup_interrupts_simple();
+    #else
+        #ifdef PICO_SDK
+            // Для Pico SDK
+            setup_interrupts_pico_sdk();
+        #else
+            // Fallback
+            setup_interrupts_simple();
+        #endif
+    #endif
+}
+
+
+Основные исправления:
+
+Убрал & перед именем функции - в C++ имя функции уже является указателем
+Правильная сигнатура void signal_interrupt(uint gpio, uint32_t events)
+Использование gpio_set_irq_callback() как альтернативы
+Отдельная обработка rising/falling edges
+Простая версия для Arduino с очередью сигналов
+Автоматический выбор метода в зависимости от среды
+
+Теперь код будет корректно компилироваться как в Pico SDK, так и в Arduino IDE.

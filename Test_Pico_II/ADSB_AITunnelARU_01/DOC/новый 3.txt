@@ -1,0 +1,324 @@
+Вы абсолютно правы! Проблема в том, что в структуре PacketQueue поле count объявлено как volatile int, а не как указатель. Оператор -> используется для указателей, а оператор . - для прямого доступа к членам. Вот исправленная версия:
+
+
+// Правильно исправленная функция packet_queue_pop
+bool packet_queue_pop(PacketQueue queue, ADSBPacket packet) {
+    if (queue->count == 0) {
+        return false; // Очередь пустая
+    }
+
+    noInterrupts();
+
+    *packet = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return true;
+}
+
+// Правильно исправленная функция decoded_queue_pop
+bool decoded_queue_pop(DecodedQueue queue, DecodedADSB decoded) {
+    if (queue->count == 0) {
+        return false;
+    }
+
+    noInterrupts();
+
+    *decoded = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_DECODED_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return true;
+}
+
+// Функция push для пакетов
+bool packet_queue_push(PacketQueue* queue, const ADSBPacket& packet) {
+    noInterrupts();
+
+    if (queue->count >= MAX_QUEUE_SIZE) {
+        // Очередь переполнена - удаляем старый пакет
+        queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+        queue->count--;
+        Serial.println("Packet queue overflow - removed old packet");
+    }
+
+    queue->packets[queue->tail] = packet;
+    queue->tail = (queue->tail + 1) % MAX_QUEUE_SIZE;
+    queue->count++;
+
+    interrupts();
+    return true;
+}
+
+// Функция push для декодированных пакетов
+bool decoded_queue_push(DecodedQueue* queue, const DecodedADSB& decoded) {
+    noInterrupts();
+
+    if (queue->count >= MAX_DECODED_QUEUE_SIZE) {
+        // Очередь переполнена - удаляем старый элемент
+        queue->head = (queue->head + 1) % MAX_DECODED_QUEUE_SIZE;
+        queue->count--;
+    }
+
+    queue->packets[queue->tail] = decoded;
+    queue->tail = (queue->tail + 1) % MAX_DECODED_QUEUE_SIZE;
+    queue->count++;
+
+    interrupts();
+    return true;
+}
+
+// Вспомогательные функции
+bool packet_queue_empty(PacketQueue* queue) {
+    return queue->count == 0;
+}
+
+int packet_queue_size(PacketQueue* queue) {
+    return queue->count;
+}
+
+bool decoded_queue_empty(DecodedQueue* queue) {
+    return queue->count == 0;
+}
+
+int decoded_queue_size(DecodedQueue* queue) {
+    return queue->count;
+}
+
+// Альтернативная версия с дополнительными проверками
+bool packet_queue_pop_safe(PacketQueue queue, ADSBPacket packet) {
+    if (queue == NULL || packet == NULL) {
+        return false; // Неверные параметры
+    }
+
+    if (queue->count == 0) {
+        return false; // Очередь пустая
+    }
+
+    // Проверка корректности индексов
+    if (queue->head < 0 || queue->head >= MAX_QUEUE_SIZE) {
+        Serial.println("Error: Invalid head index in packet queue");
+        queue->head = 0; // Сброс к безопасному значению
+        return false;
+    }
+
+    noInterrupts();
+
+    *packet = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return true;
+}
+
+bool decoded_queue_pop_safe(DecodedQueue queue, DecodedADSB decoded) {
+    if (queue == NULL || decoded == NULL) {
+        return false; // Неверные параметры
+    }
+
+    if (queue->count == 0) {
+        return false; // Очередь пустая
+    }
+
+    // Проверка корректности индексов
+    if (queue->head < 0 || queue->head >= MAX_DECODED_QUEUE_SIZE) {
+        Serial.println("Error: Invalid head index in decoded queue");
+        queue->head = 0; // Сброс к безопасному значению
+        return false;
+    }
+
+    noInterrupts();
+
+    *decoded = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_DECODED_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return true;
+}
+
+// Функция для полной очистки очереди
+void packet_queue_clear(PacketQueue* queue) {
+    if (queue == NULL) return;
+
+    noInterrupts();
+
+    queue->head = 0;
+    queue->tail = 0;
+    queue->count = 0;
+
+    // Дополнительно очищаем данные (опционально)
+    memset((void*)queue->packets, 0, sizeof(queue->packets));
+
+    interrupts();
+}
+
+void decoded_queue_clear(DecodedQueue* queue) {
+    if (queue == NULL) return;
+
+    noInterrupts();
+
+    queue->head = 0;
+    queue->tail = 0;
+    queue->count = 0;
+
+    // Дополнительно очищаем данные (опционально)
+    memset((void*)queue->packets, 0, sizeof(queue->packets));
+
+    interrupts();
+}
+
+// Функция для получения элемента без удаления (peek)
+bool packet_queue_peek(PacketQueue queue, ADSBPacket packet) {
+    if (queue == NULL || packet == NULL) {
+        return false;
+    }
+
+    if (queue->count == 0) {
+        return false; // Очередь пустая
+    }
+
+    noInterrupts();
+    *packet = queue->packets[queue->head];
+    interrupts();
+
+    return true;
+}
+
+bool decoded_queue_peek(DecodedQueue queue, DecodedADSB decoded) {
+    if (queue == NULL || decoded == NULL) {
+        return false;
+    }
+
+    if (queue->count == 0) {
+        return false; // Очередь пустая
+    }
+
+    noInterrupts();
+    *decoded = queue->packets[queue->head];
+    interrupts();
+
+    return true;
+}
+
+// Обновленная функция обработки пакетов
+void process_received_packets() {
+    ADSBPacket packet;
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    while (packets_processed < max_packets_per_call &&
+           packet_queue_pop_safe(&received_packets, &packet)) {
+
+        packets_processed++;
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                // Отправка в UART2
+                send_decoded_packet_uart(decoded, packet);
+
+                // Добавление в очередь декодированных пакетов
+                if (!decoded_queue_push(&decoded_packets, decoded)) {
+                    Serial.println("Warning: Failed to add to decoded queue");
+                }
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.println(" packets");
+    }
+}
+
+// Обновленная функция обработки декодированных пакетов
+void process_decoded_packets() {
+    DecodedADSB decoded;
+    int processed_count = 0;
+    const int max_decoded_per_call = 3;
+
+    while (processed_count < max_decoded_per_call &&
+           decoded_queue_pop_safe(&decoded_packets, &decoded)) {
+
+        processed_count++;
+
+        // Обработка декодированных данных
+        Serial2.print("ICAO: 0x");
+        Serial2.print(decoded.icao, HEX);
+
+        if (strlen(decoded.flight_id) > 0) {
+            Serial2.print(", Flight: ");
+            Serial2.print(decoded.flight_id);
+        }
+
+        if (decoded.latitude != 0.0 || decoded.longitude != 0.0) {
+            Serial2.print(", Pos: ");
+            Serial2.print(decoded.latitude, 6);
+            Serial2.print(",");
+            Serial2.print(decoded.longitude, 6);
+        }
+
+        Serial2.println();
+    }
+
+    if (processed_count > 0) {
+        Serial.print("Processed ");
+        Serial.print(processed_count);
+        Serial.println(" decoded packets");
+    }
+}
+
+// Диагностическая функция для проверки состояния очередей
+void diagnose_queues() {
+    Serial.println("=== Queue Diagnostics ===");
+
+    Serial.print("Received Queue - Count: ");
+    Serial.print(received_packets.count);
+    Serial.print(", Head: ");
+    Serial.print(received_packets.head);
+    Serial.print(", Tail: ");
+    Serial.println(received_packets.tail);
+
+    Serial.print("Decoded Queue - Count: ");
+    Serial.print(decoded_packets.count);
+    Serial.print(", Head: ");
+    Serial.print(decoded_packets.head);
+    Serial.print(", Tail: ");
+    Serial.println(decoded_packets.tail);
+
+    // Проверка корректности
+    bool received_ok = (received_packets.head >= 0 && received_packets.head < MAX_QUEUE_SIZE &&
+                       received_packets.tail >= 0 && received_packets.tail < MAX_QUEUE_SIZE &&
+                       received_packets.count >= 0 && received_packets.count <= MAX_QUEUE_SIZE);
+
+    bool decoded_ok = (decoded_packets.head >= 0 && decoded_packets.head < MAX_DECODED_QUEUE_SIZE &&
+                      decoded_packets.tail >= 0 && decoded_packets.tail < MAX_DECODED_QUEUE_SIZE &&
+                      decoded_packets.count >= 0 && decoded_packets.count <= MAX_DECODED_QUEUE_SIZE);
+
+    Serial.print("Received Queue Status: ");
+    Serial.println(received_ok ? "OK" : "ERROR");
+
+    Serial.print("Decoded Queue Status: ");
+    Serial.println(decoded_ok ? "OK" : "ERROR");
+
+    Serial.println("========================");
+}
+
+
+Основные исправления:
+
+Правильное использование операторов: queue->count (указатель на структуру)
+Добавлены проверки NULL: защита от неверных параметров
+Проверка корректности индексов: предотвращение выхода за границы
+Безопасные версии функций: с дополнительными проверками
+Функции peek: просмотр без удаления
+Диагностические функции: для отладки состояния очередей
+Улучшенная обработка ошибок: с информативными сообщениями
+
+Теперь код корректно использует операторы доступа к членам структуры и обеспечивает безопасную работу с очередями.

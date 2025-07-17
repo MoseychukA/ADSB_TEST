@@ -1,0 +1,219 @@
+Вы снова правы! Операторы умножения пропущены. Вот исправленная версия:
+
+
+// Декодирование скорости
+void decode_airborne_velocity(const ADSBPacket& packet, DecodedADSB& decoded) {
+    uint8_t subtype = (packet.data[4] & 0x07);
+
+    if (subtype == 1 || subtype == 2) {
+        // Ground Speed
+        bool ew_dir = (packet.data[5] & 0x04) != 0;
+        uint16_t ew_velocity = ((packet.data[5] & 0x03) << 8) | packet.data[6];
+
+        bool ns_dir = (packet.data[7] & 0x80) != 0;
+        uint16_t ns_velocity = ((packet.data[7] & 0x7F) << 3) |
+                              ((packet.data[8] & 0xE0) >> 5);
+
+        if (ew_velocity > 0 && ns_velocity > 0) {
+            ew_velocity -= 1;
+            ns_velocity -= 1;
+
+            // Расчет результирующей скорости (правильно исправлено)
+            decoded.speed = sqrt(ew_velocity  ew_velocity + ns_velocity  ns_velocity);
+
+            // Расчет направления
+            float heading = atan2(ew_velocity * (ew_dir ? -1 : 1),
+                                 ns_velocity * (ns_dir ? 1 : -1));
+            decoded.heading = (heading * 180.0 / PI);
+            if (decoded.heading < 0) decoded.heading += 360.0;
+        }
+
+        // Вертикальная скорость
+        bool vr_source = (packet.data[8] & 0x10) != 0;
+        bool vr_sign = (packet.data[8] & 0x08) != 0;
+        uint16_t vr_raw = ((packet.data[8] & 0x07) << 6) |
+                         ((packet.data[9] & 0xFC) >> 2);
+
+        if (vr_raw > 0) {
+            decoded.vertical_rate = (vr_raw - 1)  64  (vr_sign ? -1 : 1);
+        }
+
+        Serial.print("Velocity - Speed: ");
+        Serial.print(decoded.speed);
+        Serial.print(" kt, Heading: ");
+        Serial.print(decoded.heading);
+        Serial.print("°, VR: ");
+        Serial.print(decoded.vertical_rate);
+        Serial.println(" ft/min");
+    }
+}
+
+// Альтернативная версия без использования Math.h (для экономии памяти)
+void decode_airborne_velocity_no_math(const ADSBPacket& packet, DecodedADSB& decoded) {
+    uint8_t subtype = (packet.data[4] & 0x07);
+
+    if (subtype == 1 || subtype == 2) {
+        bool ew_dir = (packet.data[5] & 0x04) != 0;
+        uint16_t ew_velocity = ((packet.data[5] & 0x03) << 8) | packet.data[6];
+
+        bool ns_dir = (packet.data[7] & 0x80) != 0;
+        uint16_t ns_velocity = ((packet.data[7] & 0x7F) << 3) |
+                              ((packet.data[8] & 0xE0) >> 5);
+
+        if (ew_velocity > 0 && ns_velocity > 0) {
+            ew_velocity -= 1;
+            ns_velocity -= 1;
+
+            // Целочисленное вычисление скорости
+            uint32_t speed_squared = (uint32_t)ew_velocity * ew_velocity +
+                                   (uint32_t)ns_velocity * ns_velocity;
+
+            // Быстрый целочисленный квадратный корень
+            decoded.speed = fast_sqrt(speed_squared);
+
+            // Упрощенное вычисление направления без тригонометрии
+            decoded.heading = calculate_heading_approx(ew_velocity, ns_velocity, ew_dir, ns_dir);
+        }
+
+        // Вертикальная скорость
+        bool vr_sign = (packet.data[8] & 0x08) != 0;
+        uint16_t vr_raw = ((packet.data[8] & 0x07) << 6) |
+                         ((packet.data[9] & 0xFC) >> 2);
+
+        if (vr_raw > 0) {
+            decoded.vertical_rate = (vr_raw - 1)  64  (vr_sign ? -1 : 1);
+        }
+
+        Serial.print("Velocity - Speed: ");
+        Serial.print(decoded.speed);
+        Serial.print(" kt, Heading: ");
+        Serial.print(decoded.heading);
+        Serial.print("°, VR: ");
+        Serial.print(decoded.vertical_rate);
+        Serial.println(" ft/min");
+    }
+}
+
+// Быстрый целочисленный квадратный корень
+uint16_t fast_sqrt(uint32_t value) {
+    if (value == 0) return 0;
+    if (value == 1) return 1;
+
+    uint32_t x = value;
+    uint32_t y = (x + 1) >> 1; // Деление на 2
+
+    // Метод Ньютона (несколько итераций)
+    for (int i = 0; i < 10 && y < x; i++) {
+        x = y;
+        y = (x + value / x) >> 1;
+    }
+
+    return (uint16_t)x;
+}
+
+// Приблизительное вычисление направления без тригонометрии
+uint16_t calculate_heading_approx(uint16_t ew_vel, uint16_t ns_vel, bool ew_dir, bool ns_dir) {
+    if (ew_vel == 0 && ns_vel == 0) return 0;
+
+    uint16_t angle = 0;
+
+    // Соотношение скоростей
+    if (ns_vel == 0) {
+        angle = 90; // Направление восток/запад
+    } else if (ew_vel == 0) {
+        angle = 0;  // Направление север/юг
+    } else {
+        // Таблица приблизительных углов
+        uint32_t ratio = ((uint32_t)ew_vel * 100) / ns_vel;
+
+        if (ratio <= 14) angle = 8;        // ~atan(0.14) ≈ 8°
+        else if (ratio <= 29) angle = 16;  // ~atan(0.29) ≈ 16°
+        else if (ratio <= 47) angle = 25;  // ~atan(0.47) ≈ 25°
+        else if (ratio <= 70) angle = 35;  // ~atan(0.70) ≈ 35°
+        else if (ratio <= 100) angle = 45; // atan(1.0) = 45°
+        else if (ratio <= 140) angle = 55; // ~atan(1.40) ≈ 55°
+        else if (ratio <= 210) angle = 65; // ~atan(2.10) ≈ 65°
+        else if (ratio <= 350) angle = 75; // ~atan(3.50) ≈ 75°
+        else if (ratio <= 700) angle = 82; // ~atan(7.00) ≈ 82°
+        else angle = 89;
+    }
+
+    // Определение квадранта и корректировка угла
+    if (!ns_dir && !ew_dir) {
+        // I квадрант (север-восток)
+        return angle;
+    } else if (!ns_dir && ew_dir) {
+        // II квадрант (север-запад)
+        return 360 - angle;
+    } else if (ns_dir && ew_dir) {
+        // III квадрант (юг-запад)
+        return 180 + angle;
+    } else {
+        // IV квадрант (юг-восток)
+        return 180 - angle;
+    }
+}
+
+// Версия с проверкой валидности данных
+bool decode_airborne_velocity_safe(const ADSBPacket& packet, DecodedADSB& decoded) {
+    if (packet.length < 14) return false;
+
+    uint8_t subtype = (packet.data[4] & 0x07);
+
+    // Инициализация значений по умолчанию
+    decoded.speed = 0;
+    decoded.heading = 0;
+    decoded.vertical_rate = 0;
+
+    if (subtype == 1 || subtype == 2) {
+        bool ew_dir = (packet.data[5] & 0x04) != 0;
+        uint16_t ew_velocity = ((packet.data[5] & 0x03) << 8) | packet.data[6];
+
+        bool ns_dir = (packet.data[7] & 0x80) != 0;
+        uint16_t ns_velocity = ((packet.data[7] & 0x7F) << 3) |
+                              ((packet.data[8] & 0xE0) >> 5);
+
+        // Проверка валидности скоростей
+        if (ew_velocity > 0 && ew_velocity <= 1023 &&
+            ns_velocity > 0 && ns_velocity <= 1023) {
+
+            ew_velocity -= 1;
+            ns_velocity -= 1;
+
+            // Проверка разумности значений (не более 1000 узлов)
+            if (ew_velocity <= 1000 && ns_velocity <= 1000) {
+                uint32_t speed_squared = (uint32_t)ew_velocity * ew_velocity +
+                                       (uint32_t)ns_velocity * ns_velocity;
+                decoded.speed = fast_sqrt(speed_squared);
+                decoded.heading = calculate_heading_approx(ew_velocity, ns_velocity, ew_dir, ns_dir);
+            }
+        }
+
+        // Вертикальная скорость
+        uint16_t vr_raw = ((packet.data[8] & 0x07) << 6) |
+                         ((packet.data[9] & 0xFC) >> 2);
+
+        if (vr_raw > 0 && vr_raw <= 511) {
+            bool vr_sign = (packet.data[8] & 0x08) != 0;
+            decoded.vertical_rate = (vr_raw - 1) * 64;
+            if (vr_sign) decoded.vertical_rate = -decoded.vertical_rate;
+
+            // Ограничение разумными значениями (-6000 до +6000 ft/min)
+            if (decoded.vertical_rate < -6000) decoded.vertical_rate = -6000;
+            if (decoded.vertical_rate > 6000) decoded.vertical_rate = 6000;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+
+Теперь все операторы умножения правильно указаны как *. Также добавил:
+
+Безопасная версия с проверкой валидности данных
+Версия без математических функций для экономии ресурсов
+Быстрый целочисленный sqrt
+Приблизительное вычисление углов без тригонометрии
+Проверки разумности значений для фильтрации некорректных данных

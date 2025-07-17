@@ -1,0 +1,387 @@
+/*
+ * ADS-B CRC-24 Calculator for Arduino
+ * Поддерживает расчет и проверку контрольной суммы пакетов ADS-B
+ * Автор: [Ваше имя]
+ * Дата: 14.07.2025
+ */
+
+#include <Arduino.h>
+
+// Константы для CRC-24 ADS-B
+#define CRC24_POLYNOMIAL 0x1FFF409UL
+#define ADS_B_DATA_LENGTH 14    // 112 бит данных
+#define ADS_B_CRC_LENGTH 3      // 24 бита CRC
+#define ADS_B_TOTAL_LENGTH 17   // Общая длина пакета
+
+// Глобальная таблица CRC для быстрых вычислений
+uint32_t crc_table[256];
+bool table_initialized = false;
+
+// Функция инициализации CRC таблицы
+void generateCRCTable() {
+  if (table_initialized) return;
+  
+  Serial.println(F("Инициализация CRC таблицы..."));
+  
+  for (int i = 0; i < 256; i++) {
+    uint32_t crc = (uint32_t)i << 16;
+    
+    for (int j = 0; j < 8; j++) {
+      if (crc & 0x800000UL) {
+        crc = ((crc << 1) ^ CRC24_POLYNOMIAL) & 0xFFFFFFUL;
+      } else {
+        crc = (crc << 1) & 0xFFFFFFUL;
+      }
+    }
+    
+    crc_table[i] = crc;
+  }
+  
+  table_initialized = true;
+  Serial.println(F("CRC таблица готова"));
+}
+
+// Базовый алгоритм расчета CRC-24
+uint32_t calculateCRC24_basic(const uint8_t* data, uint8_t length) {
+  uint32_t crc = 0x000000UL;
+  
+  for (uint8_t i = 0; i < length; i++) {
+    crc ^= ((uint32_t)data[i] << 16);
+    
+    for (uint8_t bit = 0; bit < 8; bit++) {
+      if (crc & 0x800000UL) {
+        crc = ((crc << 1) ^ CRC24_POLYNOMIAL) & 0xFFFFFFUL;
+      } else {
+        crc = (crc << 1) & 0xFFFFFFUL;
+      }
+    }
+  }
+  
+  return crc;
+}
+
+// Быстрый алгоритм с использованием таблицы
+uint32_t calculateCRC24_fast(const uint8_t* data, uint8_t length) {
+  if (!table_initialized) {
+    generateCRCTable();
+  }
+  
+  uint32_t crc = 0x000000UL;
+  
+  for (uint8_t i = 0; i < length; i++) {
+    uint8_t table_index = ((crc >> 16) ^ data[i]) & 0xFF;
+    crc = ((crc << 8) ^ crc_table[table_index]) & 0xFFFFFFUL;
+  }
+  
+  return crc;
+}
+
+// Проверка валидности пакета ADS-B
+bool verifyADSBPacket(const uint8_t* packet) {
+  if (!packet) return false;
+  
+  // Рассчитываем CRC для данных (первые 14 байт)
+  uint32_t calculated_crc = calculateCRC24_fast(packet, ADS_B_DATA_LENGTH);
+  
+  // Извлекаем CRC из пакета (последние 3 байта, big-endian)
+  uint32_t received_crc = ((uint32_t)packet[14] << 16) |
+                          ((uint32_t)packet[15] << 8) |
+                          (uint32_t)packet[16];
+  
+  return calculated_crc == received_crc;
+}
+
+// Создание пакета с CRC
+void createADSBPacket(const uint8_t* data, uint8_t* packet) {
+  if (!data || !packet) return;
+  
+  // Копируем данные
+  memcpy(packet, data, ADS_B_DATA_LENGTH);
+  
+  // Рассчитываем и добавляем CRC
+  uint32_t crc = calculateCRC24_fast(data, ADS_B_DATA_LENGTH);
+  
+  packet[14] = (crc >> 16) & 0xFF;
+  packet[15] = (crc >> 8) & 0xFF;
+  packet[16] = crc & 0xFF;
+}
+
+// Вывод данных в hex формате
+void printHex(const uint8_t* data, uint8_t length) {
+  for (uint8_t i = 0; i < length; i++) {
+    if (data[i] < 16) Serial.print("0");
+    Serial.print(data[i], HEX);
+    if (i < length - 1) Serial.print(" ");
+  }
+}
+
+// Подробный анализ пакета
+void analyzePacket(const uint8_t* packet) {
+  Serial.println(F("\n=== Анализ пакета ADS-B ==="));
+  
+  Serial.print(F("Полный пакет: "));
+  printHex(packet, ADS_B_TOTAL_LENGTH);
+  Serial.println();
+  
+  Serial.print(F("Данные:       "));
+  printHex(packet, ADS_B_DATA_LENGTH);
+  Serial.println();
+  
+  uint32_t calculated_crc = calculateCRC24_fast(packet, ADS_B_DATA_LENGTH);
+  uint32_t received_crc = ((uint32_t)packet[14] << 16) |
+                          ((uint32_t)packet[15] << 8) |
+                          (uint32_t)packet[16];
+  
+  Serial.print(F("CRC получен:  0x"));
+  if (received_crc < 0x100000UL) Serial.print("0");
+  if (received_crc < 0x10000UL) Serial.print("0");
+  if (received_crc < 0x1000UL) Serial.print("0");
+  if (received_crc < 0x100UL) Serial.print("0");
+  if (received_crc < 0x10UL) Serial.print("0");
+  Serial.println(received_crc, HEX);
+  
+  Serial.print(F("CRC расчёт:   0x"));
+  if (calculated_crc < 0x100000UL) Serial.print("0");
+  if (calculated_crc < 0x10000UL) Serial.print("0");
+  if (calculated_crc < 0x1000UL) Serial.print("0");
+  if (calculated_crc < 0x100UL) Serial.print("0");
+  if (calculated_crc < 0x10UL) Serial.print("0");
+  Serial.println(calculated_crc, HEX);
+  
+  bool is_valid = verifyADSBPacket(packet);
+  Serial.print(F("Статус:       "));
+  Serial.println(is_valid ? F("ВАЛИДЕН") : F("ОШИБКА"));
+  Serial.println();
+}
+
+// Тест производительности
+void performanceTest() {
+  Serial.println(F("\n=== Тест производительности ==="));
+  
+  uint8_t test_data[ADS_B_DATA_LENGTH] = {
+    0x8D, 0x40, 0x62, 0x1D, 0x58, 0xC3, 0x82, 
+    0xD6, 0x90, 0xC8, 0xAC, 0x28, 0x00, 0x00
+  };
+  
+  const uint16_t iterations = 1000;
+  
+  // Тест базового алгоритма
+  unsigned long start_time = micros();
+  for (uint16_t i = 0; i < iterations; i++) {
+    calculateCRC24_basic(test_data, ADS_B_DATA_LENGTH);
+  }
+  unsigned long basic_time = micros() - start_time;
+  
+  // Тест быстрого алгоритма
+  start_time = micros();
+  for (uint16_t i = 0; i < iterations; i++) {
+    calculateCRC24_fast(test_data, ADS_B_DATA_LENGTH);
+  }
+  unsigned long fast_time = micros() - start_time;
+  
+  Serial.print(F("Базовый алгоритм: "));
+  Serial.print(basic_time);
+  Serial.print(F(" мкс ("));
+  Serial.print(iterations);
+  Serial.println(F(" итераций)"));
+  
+  Serial.print(F("Табличный алгоритм: "));
+  Serial.print(fast_time);
+  Serial.print(F(" мкс ("));
+  Serial.print(iterations);
+  Serial.println(F(" итераций)"));
+  
+  if (fast_time > 0) {
+    float speedup = (float)basic_time / (float)fast_time;
+    Serial.print(F("Ускорение: "));
+    Serial.print(speedup, 2);
+    Serial.println(F("x"));
+  }
+  Serial.println();
+}
+
+// Обработка команд из Serial
+void processSerialCommand() {
+  if (!Serial.available()) return;
+  
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+  command.toUpperCase();
+  
+  if (command == "HELP" || command == "?") {
+    printHelp();
+  }
+  else if (command == "TEST") {
+    runTestCases();
+  }
+  else if (command == "PERF") {
+    performanceTest();
+  }
+  else if (command == "DEMO") {
+    demonstrateBasicUsage();
+  }
+  else if (command.startsWith("HEX ")) {
+    processHexData(command.substring(4));
+  }
+  else if (command.length() > 0) {
+    Serial.println(F("Неизвестная команда. Введите HELP для справки."));
+  }
+}
+
+void printHelp() {
+  Serial.println(F("\n=== Команды ADS-B CRC Calculator ==="));
+  Serial.println(F("HELP или ?    - Эта справка"));
+  Serial.println(F("TEST          - Запустить тестовые случаи"));
+  Serial.println(F("PERF          - Тест производительности"));
+  Serial.println(F("DEMO          - Демонстрация работы"));
+  Serial.println(F("HEX <data>    - Обработать hex данные"));
+  Serial.println(F("              Пример: HEX 8D40621D58C382D690C8AC280000"));
+  Serial.println(F("              (28 символов для данных, 34 для пакета)"));
+  Serial.println();
+}
+
+void processHexData(String hexData) {
+  hexData.trim();
+  hexData.toUpperCase();
+  
+  // Удаляем пробелы
+  hexData.replace(" ", "");
+  
+  if (hexData.length() != 28 && hexData.length() != 34) {
+    Serial.println(F("Ошибка: Неверная длина hex данных"));
+    Serial.println(F("Ожидается 28 символов (данные) или 34 символа (пакет)"));
+    return;
+  }
+  
+  uint8_t buffer[ADS_B_TOTAL_LENGTH];
+  uint8_t length = hexData.length() / 2;
+  
+  // Конвертируем hex строку в байты
+  for (uint8_t i = 0; i < length; i++) {
+    String byteStr = hexData.substring(i * 2, i * 2 + 2);
+    buffer[i] = strtoul(byteStr.c_str(), NULL, 16);
+  }
+  
+  if (length == ADS_B_DATA_LENGTH) {
+    Serial.println(F("Интерпретируется как данные (без CRC)"));
+    uint8_t packet[ADS_B_TOTAL_LENGTH];
+    createADSBPacket(buffer, packet);
+    analyzePacket(packet);
+  } else {
+    Serial.println(F("Интерпретируется как полный пакет"));
+    analyzePacket(buffer);
+  }
+}
+
+void demonstrateBasicUsage() {
+  Serial.println(F("\n=== Демонстрация работы ==="));
+  
+  // Пример данных ADS-B
+  uint8_t sample_data[ADS_B_DATA_LENGTH] = {
+    0x8D, 0x40, 0x62, 0x1D, 0x58, 0xC3, 0x82, 
+    0xD6, 0x90, 0xC8, 0xAC, 0x28, 0x00, 0x00
+  };
+  
+  Serial.print(F("Исходные данные ADS-B (14 байт): "));
+  printHex(sample_data, ADS_B_DATA_LENGTH);
+  Serial.println();
+  
+  // Создаем пакет с CRC
+  uint8_t packet[ADS_B_TOTAL_LENGTH];
+  createADSBPacket(sample_data, packet);
+  
+  analyzePacket(packet);
+}
+
+void runTestCases() {
+  Serial.println(F("\n=== Тестовые случаи ==="));
+  
+  // Тест 1: Известные данные
+  uint8_t test1_data[ADS_B_DATA_LENGTH] = {
+    0x8D, 0x40, 0x62, 0x1D, 0x58, 0xC3, 0x82, 
+    0xD6, 0x90, 0xC8, 0xAC, 0x28, 0x00, 0x00
+  };
+  
+  uint32_t crc1 = calculateCRC24_fast(test1_data, ADS_B_DATA_LENGTH);
+  Serial.print(F("Тест 1 - CRC: 0x"));
+  if (crc1 < 0x100000UL) Serial.print("0");
+  if (crc1 < 0x10000UL) Serial.print("0");
+  if (crc1 < 0x1000UL) Serial.print("0");
+  if (crc1 < 0x100UL) Serial.print("0");
+  if (crc1 < 0x10UL) Serial.print("0");
+  Serial.println(crc1, HEX);
+  
+  // Тест 2: Нулевые данные
+  uint8_t test2_data[ADS_B_DATA_LENGTH] = {0};
+  uint32_t crc2 = calculateCRC24_fast(test2_data, ADS_B_DATA_LENGTH);
+  Serial.print(F("Тест 2 (нули) - CRC: 0x"));
+  if (crc2 < 0x100000UL) Serial.print("0");
+  if (crc2 < 0x10000UL) Serial.print("0");
+  if (crc2 < 0x1000UL) Serial.print("0");
+  if (crc2 < 0x100UL) Serial.print("0");
+  if (crc2 < 0x10UL) Serial.print("0");
+  Serial.println(crc2, HEX);
+  
+  // Тест 3: Максимальные значения
+  uint8_t test3_data[ADS_B_DATA_LENGTH];
+  memset(test3_data, 0xFF, ADS_B_DATA_LENGTH);
+  uint32_t crc3 = calculateCRC24_fast(test3_data, ADS_B_DATA_LENGTH);
+  Serial.print(F("Тест 3 (0xFF) - CRC: 0x"));
+  if (crc3 < 0x100000UL) Serial.print("0");
+  if (crc3 < 0x10000UL) Serial.print("0");
+  if (crc3 < 0x1000UL) Serial.print("0");
+  if (crc3 < 0x100UL) Serial.print("0");
+  if (crc3 < 0x10UL) Serial.print("0");
+  Serial.println(crc3, HEX);
+  
+  // Проверка совпадения алгоритмов
+  uint32_t crc1_basic = calculateCRC24_basic(test1_data, ADS_B_DATA_LENGTH);
+  bool algorithms_match = (crc1 == crc1_basic);
+  Serial.print(F("Совпадение алгоритмов: "));
+  Serial.println(algorithms_match ? F("ДА") : F("НЕТ"));
+  
+  Serial.println();
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial) {
+    ; // Ждем подключения Serial порта для Leonardo/Micro
+  }
+  
+  Serial.println(F("ADS-B CRC-24 Calculator для Arduino"));
+  Serial.println(F("==================================="));
+  Serial.print(F("Свободная память: "));
+  Serial.print(freeMemory());
+  Serial.println(F(" байт"));
+  Serial.println();
+  
+  // Инициализируем CRC таблицу
+  generateCRCTable();
+  
+  // Запускаем демонстрацию
+  demonstrateBasicUsage();
+  
+  Serial.println(F("Готов к работе! Введите HELP для справки."));
+  Serial.print(F("> "));
+}
+
+void loop() {
+  processSerialCommand();
+  delay(10); // Небольшая задержка для стабильности
+}
+
+// Функция определения свободной памяти
+int freeMemory() {
+  char top;
+#ifdef __arm__
+  // ARM архитектура (Arduino Due, Zero и т.д.)
+  return &top - reinterpret_cast<char*>(sbrk(0));
+#elif defined(CORE_TEENSY) || (ARDUINO > 103 && ARDUINO != 151)
+  // Teensy или новые версии Arduino IDE
+  return &top - __brkval;
+#else
+  // Классические AVR платы
+  return __brkval ? &top - __brkval : &top - __malloc_heap_start;
+#endif
+}

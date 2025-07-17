@@ -1,0 +1,248 @@
+Вы правы, важно понимать правильную интерпретацию Manchester кодирования для ADS-B. В ADS-B действительно используется следующая конвенция:
+
+
+// Правильное Manchester декодирование для ADS-B
+bool manchester_decode_adsb(uint32_t raw_bits, uint8_t decoded_bytes, int bit_count) {
+    if (bit_count % 2 != 0) return false;
+    if (raw_bits == NULL || decoded_bytes == NULL) return false;
+
+    int byte_count = bit_count / 16; // 2 бита Manchester = 1 бит данных, 8 бит данных = 1 байт
+
+    for (int i = 0; i < byte_count; i++) {
+        uint8_t byte_value = 0;
+
+        for (int j = 0; j < 8; j++) {
+            int manchester_idx = (i  8 + j)  2;
+
+            // Проверяем границы массива
+            if (manchester_idx + 1 >= bit_count) {
+                return false;
+            }
+
+            // ADS-B Manchester кодирование:
+            // Переход HIGH→LOW (10) = логическая 1
+            // Переход LOW→HIGH (01) = логический 0
+            if (raw_bits[manchester_idx] == 1 && raw_bits[manchester_idx + 1] == 0) {
+                // Переход 1→0 = логическая 1
+                byte_value |= (1 << (7 - j));
+            }
+            else if (raw_bits[manchester_idx] == 0 && raw_bits[manchester_idx + 1] == 1) {
+                // Переход 0→1 = логический 0 (ничего не добавляем)
+            }
+            else {
+                return false; // Ошибка Manchester кодирования - нет перехода
+            }
+        }
+
+        decoded_bytes[i] = byte_value;
+    }
+
+    return true;
+}
+
+// Альтернативная реализация с более явным определением переходов
+bool manchester_decode_transitions(uint32_t raw_bits, uint8_t decoded_bytes, int bit_count) {
+    if (bit_count % 2 != 0) return false;
+    if (raw_bits == NULL || decoded_bytes == NULL) return false;
+
+    int data_bits = bit_count / 2;
+    int byte_count = (data_bits + 7) / 8;
+
+    // Очистка выходного буфера
+    memset(decoded_bytes, 0, byte_count);
+
+    for (int i = 0; i < data_bits; i++) {
+        int manchester_idx = i * 2;
+
+        if (manchester_idx + 1 >= bit_count) {
+            break;
+        }
+
+        int byte_idx = i / 8;
+        int bit_idx = 7 - (i % 8); // MSB первый
+
+        // Анализ перехода в Manchester символе
+        uint8_t first_half = raw_bits[manchester_idx];
+        uint8_t second_half = raw_bits[manchester_idx + 1];
+
+        bool transition_detected = (first_half != second_half);
+
+        if (!transition_detected) {
+            // В Manchester кодировании всегда должен быть переход
+            return false;
+        }
+
+        // ADS-B стандарт:
+        // HIGH→LOW переход = логическая 1
+        // LOW→HIGH переход = логический 0
+        if (first_half == 1 && second_half == 0) {
+            // Переход сверху вниз = 1
+            decoded_bytes[byte_idx] |= (1 << bit_idx);
+        }
+        else if (first_half == 0 && second_half == 1) {
+            // Переход снизу вверх = 0 (бит уже 0)
+        }
+    }
+
+    return true;
+}
+
+// Функция с детектированием полярности для ADS-B
+bool manchester_decode_with_polarity_detection(uint32_t raw_bits, uint8_t decoded_bytes, int bit_count) {
+    if (raw_bits == NULL || decoded_bytes == NULL) return false;
+
+    // Пробуем стандартную полярность ADS-B (10=1, 01=0)
+    if (manchester_decode_adsb(raw_bits, decoded_bytes, bit_count)) {
+        return true;
+    }
+
+    // Если не получилось, пробуем инвертированную полярность
+    // Создаем временный буфер для результата
+    static uint8_t temp_decoded[ADSB_LONG_PACKET_BYTES];
+
+    bool success = manchester_decode_inverted_polarity(raw_bits, temp_decoded, bit_count);
+
+    if (success) {
+        // Копируем результат
+        int byte_count = bit_count / 16;
+        memcpy(decoded_bytes, temp_decoded, byte_count);
+        return true;
+    }
+
+    return false;
+}
+
+// Декодирование с инвертированной полярностью (01=1, 10=0)
+bool manchester_decode_inverted_polarity(uint32_t raw_bits, uint8_t decoded_bytes, int bit_count) {
+    if (bit_count % 2 != 0) return false;
+    if (raw_bits == NULL || decoded_bytes == NULL) return false;
+
+    int byte_count = bit_count / 16;
+    memset(decoded_bytes, 0, byte_count);
+
+    for (int i = 0; i < byte_count; i++) {
+        uint8_t byte_value = 0;
+
+        for (int j = 0; j < 8; j++) {
+            int manchester_idx = (i  8 + j)  2;
+
+            if (manchester_idx + 1 >= bit_count) {
+                return false;
+            }
+
+            // Инвертированная полярность:
+            // LOW→HIGH (01) = логическая 1
+            // HIGH→LOW (10) = логический 0
+            if (raw_bits[manchester_idx] == 0 && raw_bits[manchester_idx + 1] == 1) {
+                byte_value |= (1 << (7 - j)); // = 1
+            }
+            else if (raw_bits[manchester_idx] == 1 && raw_bits[manchester_idx + 1] == 0) {
+                // = 0 (ничего не добавляем)
+            }
+            else {
+                return false; // Ошибка кодирования
+            }
+        }
+
+        decoded_bytes[i] = byte_value;
+    }
+
+    return true;
+}
+
+// Отладочная функция для анализа Manchester сигнала
+void debug_manchester_signal(uint32_t* raw_bits, int bit_count, int start_offset = 0) {
+    Serial.println("=== Manchester Signal Analysis ===");
+
+    int pairs_to_show = min(16, bit_count / 2); // Показываем первые 16 пар
+
+    for (int i = 0; i < pairs_to_show; i++) {
+        int idx = start_offset + i * 2;
+        if (idx + 1 < bit_count) {
+            uint8_t first = raw_bits[idx];
+            uint8_t second = raw_bits[idx + 1];
+
+            Serial.print("Pair ");
+            if (i < 10) Serial.print(" ");
+            Serial.print(i);
+            Serial.print(": ");
+            Serial.print(first);
+            Serial.print(second);
+
+            if (first == 1 && second == 0) {
+                Serial.println(" → 1 (HIGH→LOW)");
+            } else if (first == 0 && second == 1) {
+                Serial.println(" → 0 (LOW→HIGH)");
+            } else {
+                Serial.println(" → ERROR (no transition)");
+            }
+        }
+    }
+
+    // Статистика переходов
+    int high_to_low = 0;
+    int low_to_high = 0;
+    int no_transition = 0;
+
+    for (int i = 0; i < bit_count / 2; i++) {
+        int idx = start_offset + i * 2;
+        if (idx + 1 < bit_count) {
+            if (raw_bits[idx] == 1 && raw_bits[idx + 1] == 0) {
+                high_to_low++;
+            } else if (raw_bits[idx] == 0 && raw_bits[idx + 1] == 1) {
+                low_to_high++;
+            } else {
+                no_transition++;
+            }
+        }
+    }
+
+    Serial.print("Statistics - H→L: ");
+    Serial.print(high_to_low);
+    Serial.print(", L→H: ");
+    Serial.print(low_to_high);
+    Serial.print(", Errors: ");
+    Serial.println(no_transition);
+    Serial.println("================================");
+}
+
+// Обновленная функция тестирования
+void test_manchester_decoder_adsb() {
+    Serial.println("Testing ADS-B Manchester decoder...");
+
+    // Тест 1: Байт 0xA5 = 10100101
+    // В ADS-B Manchester: каждый бит кодируется как переход
+    // 1→ HIGH→LOW (10), 0→ LOW→HIGH (01)
+    // 10100101 → 10 01 10 01 01 10 01 10
+    uint32_t test_bits_a5[] = {1,0, 0,1, 1,0, 0,1, 0,1, 1,0, 0,1, 1,0};
+    uint8_t decoded[1];
+
+    Serial.println("Test 1: Decoding 0xA5");
+    debug_manchester_signal(test_bits_a5, 16);
+
+    if (manchester_decode_adsb(test_bits_a5, decoded, 16)) {
+        Serial.print("Result: 0x");
+        if (decoded[0] < 0x10) Serial.print("0");
+        Serial.print(decoded[0], HEX);
+        if (decoded[0] == 0xA5) {
+            Serial.println(" ✓ PASS");
+        } else {
+            Serial.println(" ✗ FAIL");
+        }
+    } else {
+        Serial.println("Decode failed ✗");
+    }
+
+    Serial.println();
+}
+
+
+Ключевые изменения в понимании Manchester кодирования для ADS-B:
+
+HIGH→LOW (10) = логическая 1 - переход сверху вниз означает единицу
+LOW→HIGH (01) = логический 0 - переход снизу вверх означает ноль
+Всегда должен быть переход - отсутствие перехода (00 или 11) является ошибкой
+Детектирование полярности - возможность автоматического определения правильной полярности
+Отладочные функции - для анализа принятого сигнала
+
+Эта реализация правильно декодирует Manchester кодирование согласно стандарту ADS-B.

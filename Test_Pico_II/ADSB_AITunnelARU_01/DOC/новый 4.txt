@@ -1,0 +1,348 @@
+Вот несколько альтернативных вариантов реализации функции packet_queue_pop:
+
+Вариант 1: Возврат указателя на элемент
+
+
+// Возвращает указатель на элемент или NULL если очередь пустая
+ADSBPacket packet_queue_get_next(PacketQueue queue) {
+    if (queue == NULL || queue->count == 0) {
+        return NULL; // Очередь пустая
+    }
+
+    noInterrupts();
+
+    ADSBPacket* packet = &queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return packet;
+}
+
+// Использование:
+void process_received_packets() {
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    while (packets_processed < max_packets_per_call) {
+        ADSBPacket* packet = packet_queue_get_next(&received_packets);
+        if (packet == NULL) {
+            break; // Очередь пустая
+        }
+
+        packets_processed++;
+
+        if (packet->valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(*packet);
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, *packet);
+                decoded_queue_push(&decoded_packets, decoded);
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.println(" packets");
+    }
+}
+
+
+Вариант 2: Функция с возвратом через return
+
+
+// Структура для результата операции
+struct PacketResult {
+    bool success;
+    ADSBPacket packet;
+};
+
+PacketResult packet_queue_pop_result(PacketQueue* queue) {
+    PacketResult result;
+    result.success = false;
+
+    if (queue == NULL || queue->count == 0) {
+        return result; // Неуспешный результат
+    }
+
+    noInterrupts();
+
+    result.packet = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+    queue->count--;
+    result.success = true;
+
+    interrupts();
+    return result;
+}
+
+// Использование:
+void process_received_packets() {
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    while (packets_processed < max_packets_per_call) {
+        PacketResult result = packet_queue_pop_result(&received_packets);
+        if (!result.success) {
+            break; // Очередь пустая
+        }
+
+        packets_processed++;
+
+        if (result.packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(result.packet);
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, result.packet);
+                decoded_queue_push(&decoded_packets, decoded);
+            }
+        }
+    }
+}
+
+
+Вариант 3: Функция с callback
+
+
+// Тип функции callback
+typedef void (PacketProcessor)(const ADSBPacket& packet, void user_data);
+
+// Обработка всех пакетов в очереди с callback
+int packet_queue_process_all(PacketQueue queue, PacketProcessor processor, void user_data) {
+    if (queue == NULL || processor == NULL) {
+        return 0;
+    }
+
+    int processed = 0;
+
+    while (queue->count > 0) {
+        noInterrupts();
+
+        ADSBPacket packet = queue->packets[queue->head];
+        queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+        queue->count--;
+
+        interrupts();
+
+        processor(packet, user_data);
+        processed++;
+    }
+
+    return processed;
+}
+
+// Callback функция для обработки пакета
+void process_single_packet(const ADSBPacket& packet, void* user_data) {
+    int counter = (int)user_data;
+    (*counter)++;
+
+    if (packet.valid_crc) {
+        DecodedADSB decoded = decode_adsb_packet(packet);
+        if (decoded.valid) {
+            send_decoded_packet_uart(decoded, packet);
+            decoded_queue_push(&decoded_packets, decoded);
+        }
+    }
+}
+
+// Использование:
+void process_received_packets() {
+    int processed_count = 0;
+    int total_processed = packet_queue_process_all(&received_packets,
+                                                  process_single_packet,
+                                                  &processed_count);
+
+    if (total_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(total_processed);
+        Serial.println(" packets");
+    }
+}
+
+
+Вариант 4: Итераторная модель
+
+
+// Структура итератора
+struct PacketIterator {
+    PacketQueue* queue;
+    bool valid;
+    ADSBPacket current_packet;
+};
+
+// Инициализация итератора
+PacketIterator packet_queue_begin(PacketQueue* queue) {
+    PacketIterator iter;
+    iter.queue = queue;
+    iter.valid = false;
+
+    if (queue != NULL && queue->count > 0) {
+        noInterrupts();
+
+        iter.current_packet = queue->packets[queue->head];
+        queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+        queue->count--;
+        iter.valid = true;
+
+        interrupts();
+    }
+
+    return iter;
+}
+
+// Получение следующего элемента
+bool packet_iterator_next(PacketIterator* iter) {
+    if (iter == NULL || iter->queue == NULL) {
+        return false;
+    }
+
+    if (iter->queue->count == 0) {
+        iter->valid = false;
+        return false;
+    }
+
+    noInterrupts();
+
+    iter->current_packet = iter->queue->packets[iter->queue->head];
+    iter->queue->head = (iter->queue->head + 1) % MAX_QUEUE_SIZE;
+    iter->queue->count--;
+
+    interrupts();
+
+    return true;
+}
+
+// Использование:
+void process_received_packets() {
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    PacketIterator iter = packet_queue_begin(&received_packets);
+
+    while (iter.valid && packets_processed < max_packets_per_call) {
+        packets_processed++;
+
+        if (iter.current_packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(iter.current_packet);
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, iter.current_packet);
+                decoded_queue_push(&decoded_packets, decoded);
+            }
+        }
+
+        // Переходим к следующему элементу
+        packet_iterator_next(&iter);
+    }
+}
+
+
+Вариант 5: Пакетная обработка
+
+
+// Получение нескольких пакетов сразу
+int packet_queue_pop_batch(PacketQueue queue, ADSBPacket packets, int max_count) {
+    if (queue == NULL || packets == NULL || max_count <= 0) {
+        return 0;
+    }
+
+    int extracted = 0;
+
+    noInterrupts();
+
+    while (queue->count > 0 && extracted < max_count) {
+        packets[extracted] = queue->packets[queue->head];
+        queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+        queue->count--;
+        extracted++;
+    }
+
+    interrupts();
+
+    return extracted;
+}
+
+// Использование:
+void process_received_packets() {
+    const int batch_size = 5;
+    ADSBPacket packet_batch[batch_size];
+
+    int extracted = packet_queue_pop_batch(&received_packets, packet_batch, batch_size);
+
+    for (int i = 0; i < extracted; i++) {
+        if (packet_batch[i].valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet_batch[i]);
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet_batch[i]);
+                decoded_queue_push(&decoded_packets, decoded);
+            }
+        }
+    }
+
+    if (extracted > 0) {
+        Serial.print("Processed batch of ");
+        Serial.print(extracted);
+        Serial.println(" packets");
+    }
+}
+
+
+Рекомендуемый вариант для вашего проекта:
+
+Для ADS-B приемника рекомендую Вариант 5 (пакетная обработка), так как он:
+
+Эффективен - минимизирует количество блокировок прерываний
+Прост в использовании - понятный интерфейс
+Безопасен - меньше вероятность гонки потоков
+Производителен - обрабатывает несколько пакетов за раз
+
+Вот полная интеграция рекомендуемого варианта:
+
+
+// Замена старой функции на новую
+int packet_queue_pop_batch(PacketQueue queue, ADSBPacket packets, int max_count) {
+    if (queue == NULL || packets == NULL || max_count <= 0) {
+        return 0;
+    }
+
+    int extracted = 0;
+
+    noInterrupts();
+
+    while (queue->count > 0 && extracted < max_count) {
+        packets[extracted] = queue->packets[queue->head];
+        queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+        queue->count--;
+        extracted++;
+    }
+
+    interrupts();
+
+    return extracted;
+}
+
+// Обновленная функция обработки
+void process_received_packets() {
+    const int batch_size = 5;
+    ADSBPacket packet_batch[batch_size];
+
+    int extracted = packet_queue_pop_batch(&received_packets, packet_batch, batch_size);
+
+    for (int i = 0; i < extracted; i++) {
+        if (packet_batch[i].valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet_batch[i]);
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet_batch[i]);
+                decoded_queue_push(&decoded_packets, decoded);
+            }
+        }
+    }
+
+    if (extracted > 0) {
+        Serial.print("Processed batch of ");
+        Serial.print(extracted);
+        Serial.println(" packets");
+    }
+}
+
+
+Эта реализация будет наиболее эффективной для высокочастотной обработки ADS-B пакетов.

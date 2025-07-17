@@ -1,0 +1,267 @@
+Вы правы, здесь может быть проблема с попыткой доступа к пустой очереди. Вот исправленная версия с безопасной обработкой очереди:
+
+
+// Безопасная обработка очереди принятых пакетов
+void process_received_packets() {
+    // Проверяем, что очередь не пустая перед доступом
+    if (!received_packets.empty()) {
+        // Получаем пакет из начала очереди
+        ADSBPacket packet = received_packets.front();
+        received_packets.pop(); // Удаляем из очереди
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                // Отправка в UART2
+                send_decoded_packet_uart(decoded, packet);
+            }
+        }
+    }
+}
+
+// Функция отправки декодированных данных в UART
+void send_decoded_packet_uart(const DecodedADSB& decoded, const ADSBPacket& packet) {
+    UART2.print("ICAO: ");
+    UART2.print(decoded.icao, HEX);
+    UART2.print(", Flight: ");
+    UART2.print(decoded.flight_id);
+    UART2.print(", Lat: ");
+    UART2.print(decoded.latitude, 6);
+    UART2.print(", Lon: ");
+    UART2.print(decoded.longitude, 6);
+    UART2.print(", Alt: ");
+    UART2.print(decoded.altitude);
+    UART2.print(" ft, Speed: ");
+    UART2.print(decoded.speed);
+    UART2.print(" kt");
+
+    if (packet.error_corrected) {
+        UART2.print(" [CORRECTED]");
+    }
+
+    UART2.println();
+}
+
+// Улучшенная версия с защитой от переполнения и статистикой
+void process_received_packets_advanced() {
+    static uint32_t processed_count = 0;
+    static uint32_t queue_overflow_count = 0;
+    static uint32_t last_stats_time = 0;
+
+    // Ограничиваем количество пакетов, обрабатываемых за один вызов
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    while (!received_packets.empty() && packets_processed < max_packets_per_call) {
+        try {
+            ADSBPacket packet = received_packets.front();
+            received_packets.pop();
+
+            processed_count++;
+            packets_processed++;
+
+            // Обработка пакета
+            if (packet.valid_crc) {
+                DecodedADSB decoded = decode_adsb_packet(packet);
+
+                if (decoded.valid) {
+                    send_decoded_packet_uart(decoded, packet);
+
+                    // Добавляем в очередь декодированных пакетов для дальнейшей обработки
+                    if (decoded_packets.size() < 20) { // Ограичиваем размер очереди
+                        decoded_packets.push(decoded);
+                    } else {
+                        // Удаляем старый пакет при переполнении
+                        decoded_packets.pop();
+                        decoded_packets.push(decoded);
+                        queue_overflow_count++;
+                    }
+                }
+            }
+
+        } catch (...) {
+            // В случае исключения просто продолжаем
+            Serial.println("Error processing packet");
+            break;
+        }
+    }
+
+    // Периодическая статистика
+    uint32_t current_time = millis();
+    if (current_time - last_stats_time > 10000) { // Каждые 10 секунд
+        Serial.print("Packets processed: ");
+        Serial.print(processed_count);
+        Serial.print(", Queue overflows: ");
+        Serial.print(queue_overflow_count);
+        Serial.print(", Current queue size: ");
+        Serial.println(received_packets.size());
+
+        last_stats_time = current_time;
+    }
+}
+
+// Функция для безопасного добавления пакетов в очередь
+bool add_packet_to_queue(const ADSBPacket& packet) {
+    const size_t max_queue_size = 50; // Максимальный размер очереди
+
+    if (received_packets.size() >= max_queue_size) {
+        // Очередь переполнена - удаляем старые пакеты
+        while (received_packets.size() >= max_queue_size - 5) {
+            received_packets.pop();
+        }
+        Serial.println("Queue overflow - removed old packets");
+    }
+
+    try {
+        received_packets.push(packet);
+        return true;
+    } catch (...) {
+        Serial.println("Failed to add packet to queue");
+        return false;
+    }
+}
+
+// Функция очистки очереди при необходимости
+void clear_packet_queue() {
+    while (!received_packets.empty()) {
+        received_packets.pop();
+    }
+
+    while (!decoded_packets.empty()) {
+        decoded_packets.pop();
+    }
+
+    Serial.println("Packet queues cleared");
+}
+
+// Получение размера очереди
+size_t get_queue_size() {
+    return received_packets.size();
+}
+
+// Проверка состояния очереди
+void check_queue_health() {
+    static uint32_t last_check_time = 0;
+    uint32_t current_time = millis();
+
+    if (current_time - last_check_time > 5000) { // Каждые 5 секунд
+        size_t queue_size = received_packets.size();
+
+        if (queue_size > 30) {
+            Serial.print("Warning: Large queue size: ");
+            Serial.println(queue_size);
+        }
+
+        if (queue_size == 0) {
+            // Возможно, нет входящих данных
+            static uint32_t empty_queue_count = 0;
+            empty_queue_count++;
+
+            if (empty_queue_count > 10) { // 50 секунд без пакетов
+                Serial.println("Warning: No packets received for extended period");
+                empty_queue_count = 0;
+            }
+        }
+
+        last_check_time = current_time;
+    }
+}
+
+// Обновленная задача для ядра 1 (обработка)
+void core1_task_updated() {
+    static uint32_t last_led_toggle = 0;
+
+    while (true) {
+        uint32_t current_time = millis();
+
+        // Переключение LED каждые 500 мс
+        if (current_time - last_led_toggle >= 500) {
+            digitalWrite(CORE1_LED_PIN, !digitalRead(CORE1_LED_PIN));
+            last_led_toggle = current_time;
+        }
+
+        // Безопасная обработка принятых пакетов
+        process_received_packets_advanced();
+
+        // Проверка состояния очереди
+        check_queue_health();
+
+        // Небольшая задержка для предотвращения блокировки
+        delay(1);
+    }
+}
+
+// Альтернативная реализация с использованием указателей (более эффективно)
+void process_received_packets_ptr() {
+    while (!received_packets.empty()) {
+        // Получаем ссылку на пакет вместо копии
+        const ADSBPacket& packet = received_packets.front();
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet);
+            }
+        }
+
+        // Удаляем пакет из очереди только после обработки
+        received_packets.pop();
+    }
+}
+
+// Пакетная обработка для повышения эффективности
+void process_packets_batch() {
+    static ADSBPacket packet_batch[10]; // Буфер для пакетной обработки
+    int batch_size = 0;
+
+    // Собираем пакеты в батч
+    while (!received_packets.empty() && batch_size < 10) {
+        packet_batch[batch_size] = received_packets.front();
+        received_packets.pop();
+        batch_size++;
+    }
+
+    // Обрабатываем батч
+    for (int i = 0; i < batch_size; i++) {
+        if (packet_batch[i].valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet_batch[i]);
+
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet_batch[i]);
+            }
+        }
+    }
+
+    if (batch_size > 0) {
+        Serial.print("Processed batch of ");
+        Serial.print(batch_size);
+        Serial.println(" packets");
+    }
+}
+
+// Макросы для безопасной работы с очередью
+#define SAFE_QUEUE_ACCESS(queue, action) \
+    do { \
+        if (!queue.empty()) { \
+            action; \
+        } \
+    } while(0)
+
+#define CHECK_QUEUE_SIZE(queue, max_size) \
+    (queue.size() < max_size)
+
+
+Основные улучшения:
+
+Проверка на пустоту перед доступом к front()
+Ограничение размера очереди для предотвращения переполнения памяти
+Пакетная обработка для повышения эффективности
+Статистика и мониторинг состояния очередей
+Обработка ошибок с помощью try-catch
+Использование ссылок вместо копирования для экономии памяти
+Автоматическая очистка при переполнении
+Макросы для безопасной работы с очередями
+
+Этот код предотвращает крахи программы при работе с пустыми очередями и обеспечивает стабильную работу системы.

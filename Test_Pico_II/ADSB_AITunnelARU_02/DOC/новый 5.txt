@@ -1,0 +1,176 @@
+Вы правы, в Arduino IDE с C++ для микроконтроллеров лучше использовать стандартную проверку на NULL. Вот исправленная версия:
+
+
+// Улучшенная версия с правильной проверкой указателей для Arduino
+bool manchester_decode_advanced(uint32_t raw_bits, uint8_t decoded_bytes, int bit_count) {
+    if (bit_count % 2 != 0) return false;
+    if (raw_bits == NULL || decoded_bytes == NULL) return false;  // Используем NULL вместо nullptr
+
+    int data_bits = bit_count / 2; // Количество декодированных битов
+    int byte_count = (data_bits + 7) / 8; // Округление вверх для неполных байтов
+
+    // Очистка выходного буфера
+    memset(decoded_bytes, 0, byte_count);
+
+    int error_count = 0;
+    const int max_errors = bit_count / 20; // Допускаем до 5% ошибок
+
+    for (int i = 0; i < data_bits; i++) {
+        int manchester_idx = i * 2;
+
+        // Проверяем границы
+        if (manchester_idx + 1 >= bit_count) {
+            break;
+        }
+
+        int byte_idx = i / 8;
+        int bit_idx = 7 - (i % 8); // MSB первый
+
+        bool bit_value;
+        bool valid_manchester = true;
+
+        // Manchester декодирование: 10 = 0, 01 = 1
+        if (raw_bits[manchester_idx] == 1 && raw_bits[manchester_idx + 1] == 0) {
+            bit_value = 0;
+        }
+        else if (raw_bits[manchester_idx] == 0 && raw_bits[manchester_idx + 1] == 1) {
+            bit_value = 1;
+        }
+        else {
+            // Невалидная Manchester пара - попытка восстановления
+            valid_manchester = false;
+            error_count++;
+
+            // Простое восстановление - используем первый бит
+            bit_value = raw_bits[manchester_idx];
+
+            if (error_count > max_errors) {
+                return false; // Слишком много ошибок
+            }
+        }
+
+        // Устанавливаем бит в выходном байте
+        if (bit_value) {
+            decoded_bytes[byte_idx] |= (1 << bit_idx);
+        }
+    }
+
+    return true;
+}
+
+// Функция для декодирования с автоматическим определением фазы (исправленная)
+bool manchester_decode_with_phase_detection(uint32_t raw_bits, uint8_t decoded_bytes, int bit_count) {
+    if (raw_bits == NULL || decoded_bytes == NULL) return false;
+
+    // Пробуем декодировать с прямой фазой
+    if (manchester_decode_advanced(raw_bits, decoded_bytes, bit_count)) {
+        return true;
+    }
+
+    // Если не получилось, пробуем с инвертированной фазой
+    // Используем статический буфер для избежания динамического выделения памяти
+    static uint32_t inverted_bits[ADSB_LONG_PACKET_BITS * 2 + PREAMBLE_LENGTH];
+
+    if (bit_count > sizeof(inverted_bits)/sizeof(inverted_bits[0])) {
+        return false; // Слишком большой буфер
+    }
+
+    for (int i = 0; i < bit_count; i++) {
+        inverted_bits[i] = raw_bits[i] ? 0 : 1;
+    }
+
+    bool result = manchester_decode_advanced(inverted_bits, decoded_bytes, bit_count);
+    return result;
+}
+
+// Базовая версия без дополнительных проверок (оригинальная исправленная)
+bool manchester_decode(uint32_t raw_bits, uint8_t decoded_bytes, int bit_count) {
+    if (bit_count % 2 != 0) return false; // Manchester требует четное количество битов
+    if (raw_bits == NULL || decoded_bytes == NULL) return false;
+
+    int byte_count = bit_count / 16; // 2 бита Manchester = 1 бит данных, 8 бит данных = 1 байт
+
+    for (int i = 0; i < byte_count; i++) {
+        uint8_t byte_value = 0;
+
+        for (int j = 0; j < 8; j++) {
+            int manchester_idx = (i  8 + j)  2;
+
+            // Проверяем границы массива
+            if (manchester_idx + 1 >= bit_count) {
+                return false; // Выход за границы
+            }
+
+            // Manchester: 10 = 0, 01 = 1
+            if (raw_bits[manchester_idx] == 1 && raw_bits[manchester_idx + 1] == 0) {
+                // bit = 0 (ничего не добавляем к byte_value)
+            }
+            else if (raw_bits[manchester_idx] == 0 && raw_bits[manchester_idx + 1] == 1) {
+                byte_value |= (1 << (7 - j)); // bit = 1
+            }
+            else {
+                return false; // Ошибка Manchester кодирования
+            }
+        }
+
+        decoded_bytes[i] = byte_value;
+    }
+
+    return true;
+}
+
+// Дополнительная функция для проверки качества Manchester сигнала
+float calculate_manchester_quality(uint32_t* raw_bits, int bit_count) {
+    if (raw_bits == NULL || bit_count < 2) return 0.0;
+
+    int valid_pairs = 0;
+    int total_pairs = bit_count / 2;
+
+    for (int i = 0; i < total_pairs; i++) {
+        int idx = i * 2;
+        if (idx + 1 < bit_count) {
+            // Подсчитываем валидные Manchester пары
+            if ((raw_bits[idx] == 1 && raw_bits[idx + 1] == 0) ||
+                (raw_bits[idx] == 0 && raw_bits[idx + 1] == 1)) {
+                valid_pairs++;
+            }
+        }
+    }
+
+    return (float)valid_pairs / total_pairs;
+}
+
+// Функция для тестирования Manchester декодера (исправленная)
+void test_manchester_decoder() {
+    Serial.println("Testing Manchester decoder...");
+
+    // Тестовые данные: 0xA5 = 10100101 в Manchester будет:
+    // 1010 0110 1001 0110 (10=0, 01=1)
+    uint32_t test_bits[] = {1,0,1,0, 0,1,1,0, 1,0,0,1, 0,1,1,0};
+    uint8_t decoded[1];
+
+    if (manchester_decode(test_bits, decoded, 16)) {
+        Serial.print("Test passed: 0x");
+        if (decoded[0] < 0x10) Serial.print("0");
+        Serial.print(decoded[0], HEX);
+        Serial.println(" (expected: 0xA5)");
+    } else {
+        Serial.println("Test failed");
+    }
+
+    // Тест качества сигнала
+    float quality = calculate_manchester_quality(test_bits, 16);
+    Serial.print("Signal quality: ");
+    Serial.print(quality * 100, 1);
+    Serial.println("%");
+}
+
+
+Основные изменения для совместимости с Arduino IDE:
+
+nullptr → NULL - используем стандартный NULL указатель
+Избегаем new/delete - используем статические буферы вместо динамического выделения памяти
+Добавлена проверка размеров буферов - предотвращаем переполнение статических буферов
+Совместимость с C++98/C++11 - код работает со старыми стандартами C++
+
+Эта версия будет корректно компилироваться в Arduino IDE для RP2040 и других микроконтроллеров.

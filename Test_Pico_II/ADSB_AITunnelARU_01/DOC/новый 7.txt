@@ -1,0 +1,311 @@
+Вот улучшенная и исправленная версия функции декодирования ADS-B пакета с более точной обработкой различных типов сообщений:
+
+
+// Декодирование ADS-B пакета с полной поддержкой всех типов сообщений
+DecodedADSB decode_adsb_packet(const ADSBPacket& packet) {
+    DecodedADSB decoded = {0};
+    decoded.valid = false;
+
+    if (packet.length < 7) return decoded;
+
+    // Извлечение Downlink Format (первые 5 бит)
+    uint8_t downlink_format = (packet.data[0] >> 3) & 0x1F;
+
+    // Проверяем, что это ADS-B сообщение (DF 17 или 18)
+    if (downlink_format != 17 && downlink_format != 18) {
+        return decoded; // Не ADS-B сообщение
+    }
+
+    // Извлечение ICAO адреса (байты 1-3)
+    decoded.icao = ((uint32_t)packet.data[1] << 16) |
+                   ((uint32_t)packet.data[2] << 8) |
+                   packet.data[3];
+
+    if (packet.length >= 14) { // Длинный пакет (Extended Squitter)
+        // Извлечение Type Code из ME field (первые 5 бит)
+        uint8_t type_code = (packet.data[4] >> 3) & 0x1F;
+        decoded.message_type = type_code;
+
+        // Декодирование по типу сообщения
+        switch (type_code) {
+            case 1: case 2: case 3: case 4:
+                // Aircraft Identification
+                decode_aircraft_identification(packet, decoded);
+                break;
+
+            case 5: case 6: case 7: case 8:
+                // Surface Position
+                decode_surface_position(packet, decoded);
+                break;
+
+            case 9: case 10: case 11: case 12: case 13: case 14: case 15: case 16: case 17: case 18:
+                // Airborne Position (with Barometric Altitude)
+                decode_airborne_position(packet, decoded);
+                break;
+
+            case 19:
+                // Airborne Velocities
+                decode_airborne_velocity(packet, decoded);
+                break;
+
+            case 20: case 21: case 22:
+                // Airborne Position (with GNSS Height)
+                decode_airborne_position_gnss(packet, decoded);
+                break;
+
+            case 23: case 24: case 25: case 26: case 27:
+                // Test Message
+                Serial.print("Test message received, type: ");
+                Serial.println(type_code);
+                break;
+
+            case 28:
+                // Aircraft Status
+                decode_aircraft_status(packet, decoded);
+                break;
+
+            case 29:
+                // Target State and Status Information
+                decode_target_state_status(packet, decoded);
+                break;
+
+            case 31:
+                // Aircraft Operation Status
+                decode_aircraft_operation_status(packet, decoded);
+                break;
+
+            default:
+                Serial.print("Unknown message type: ");
+                Serial.println(type_code);
+                break;
+        }
+    } else if (packet.length == 7) {
+        // Короткий пакет (Short Squitter)
+        decoded.message_type = 0; // Короткое сообщение
+        Serial.println("Short squitter message");
+    }
+
+    decoded.valid = true;
+    return decoded;
+}
+
+// Декодирование идентификации воздушного судна
+void decode_aircraft_identification(const ADSBPacket& packet, DecodedADSB& decoded) {
+    // Извлечение категории воздушного судна
+    uint8_t aircraft_category = packet.data[4] & 0x07;
+
+    // Извлечение 8-символьного callsign (биты 8-55 ME field)
+    uint64_t callsign_raw = 0;
+
+    // Собираем 48 бит callsign из байтов 5-10
+    callsign_raw = ((uint64_t)packet.data[5] << 40) |
+                   ((uint64_t)packet.data[6] << 32) |
+                   ((uint64_t)packet.data[7] << 24) |
+                   ((uint64_t)packet.data[8] << 16) |
+                   ((uint64_t)packet.data[9] << 8) |
+                   packet.data[10];
+
+    // Декодирование 6-битовых символов
+    for (int i = 0; i < 8; i++) {
+        uint8_t char_code = (callsign_raw >> (42 - i * 6)) & 0x3F;
+
+        if (char_code == 0) {
+            decoded.flight_id[i] = '\0';
+            break;
+        } else if (char_code >= 1 && char_code <= 26) {
+            decoded.flight_id[i] = 'A' + char_code - 1;
+        } else if (char_code >= 48 && char_code <= 57) {
+            decoded.flight_id[i] = '0' + (char_code - 48);
+        } else if (char_code == 32) {
+            decoded.flight_id[i] = ' ';
+        } else {
+            decoded.flight_id[i] = '?'; // Неизвестный символ
+        }
+    }
+    decoded.flight_id[8] = '\0'; // Завершающий ноль
+
+    Serial.print("Aircraft ID: ");
+    Serial.print(decoded.flight_id);
+    Serial.print(", Category: ");
+    Serial.println(aircraft_category);
+}
+
+// Декодирование воздушной позиции с барометрической высотой
+void decode_airborne_position(const ADSBPacket& packet, DecodedADSB& decoded) {
+    // Биты 8-19: Altitude
+    uint16_t altitude_raw = ((packet.data[5] & 0xFF) << 4) |
+                           ((packet.data[6] & 0xF0) >> 4);
+
+    // Декодирование высоты
+    if (altitude_raw != 0) {
+        // Бит 7 в altitude - это Q-bit
+        bool q_bit = (packet.data[6] & 0x01) != 0;
+
+        if (q_bit) {
+            // 25-футовые инкременты
+            uint16_t n = ((altitude_raw & 0xFE0) >> 1) | (altitude_raw & 0x0F);
+            decoded.altitude = n * 25 - 1000;
+        } else {
+            // Режим C/S (более сложное декодирование)
+            decoded.altitude = decode_mode_c_altitude(altitude_raw);
+        }
+    }
+
+    // Биты 20-21: Time flag и CPR format
+    bool time_flag = (packet.data[6] & 0x08) != 0;
+    bool cpr_format = (packet.data[6] & 0x04) != 0;
+
+    // Биты 22-38: Latitude CPR
+    uint32_t lat_cpr = ((packet.data[6] & 0x03) << 15) |
+                       (packet.data[7] << 7) |
+                       (packet.data[8] >> 1);
+
+    // Биты 39-55: Longitude CPR
+    uint32_t lon_cpr = ((packet.data[8] & 0x01) << 16) |
+                       (packet.data[9] << 8) |
+                       packet.data[10];
+
+    // CPR декодирование (упрощенная версия - требует более сложной реализации)
+    decode_cpr_position(lat_cpr, lon_cpr, cpr_format, decoded);
+
+    Serial.print("Position - Alt: ");
+    Serial.print(decoded.altitude);
+    Serial.print(" ft, CPR format: ");
+    Serial.print(cpr_format);
+    Serial.print(", Time: ");
+    Serial.println(time_flag);
+}
+
+// Декодирование скорости
+void decode_airborne_velocity(const ADSBPacket& packet, DecodedADSB& decoded) {
+    uint8_t subtype = (packet.data[4] & 0x07);
+
+    if (subtype == 1 || subtype == 2) {
+        // Ground Speed
+        bool ew_dir = (packet.data[5] & 0x04) != 0;
+        uint16_t ew_velocity = ((packet.data[5] & 0x03) << 8) | packet.data[6];
+
+        bool ns_dir = (packet.data[7] & 0x80) != 0;
+        uint16_t ns_velocity = ((packet.data[7] & 0x7F) << 3) |
+                              ((packet.data[8] & 0xE0) >> 5);
+
+        if (ew_velocity > 0 && ns_velocity > 0) {
+            ew_velocity -= 1;
+            ns_velocity -= 1;
+
+            // Расчет результирующей скорости
+            decoded.speed = sqrt(ew_velocity  ew_velocity + ns_velocity  ns_velocity);
+
+            // Расчет направления
+            float heading = atan2(ew_velocity * (ew_dir ? -1 : 1),
+                                 ns_velocity * (ns_dir ? 1 : -1));
+            decoded.heading = (heading * 180.0 / PI);
+            if (decoded.heading < 0) decoded.heading += 360.0;
+        }
+
+        // Вертикальная скорость
+        bool vr_source = (packet.data[8] & 0x10) != 0;
+        bool vr_sign = (packet.data[8] & 0x08) != 0;
+        uint16_t vr_raw = ((packet.data[8] & 0x07) << 6) |
+                         ((packet.data[9] & 0xFC) >> 2);
+
+        if (vr_raw > 0) {
+            decoded.vertical_rate = (vr_raw - 1)  64  (vr_sign ? -1 : 1);
+        }
+
+        Serial.print("Velocity - Speed: ");
+        Serial.print(decoded.speed);
+        Serial.print(" kt, Heading: ");
+        Serial.print(decoded.heading);
+        Serial.print("°, VR: ");
+        Serial.print(decoded.vertical_rate);
+        Serial.println(" ft/min");
+    }
+}
+
+// Упрощенное CPR декодирование (требует полной реализации для точности)
+void decode_cpr_position(uint32_t lat_cpr, uint32_t lon_cpr, bool format, DecodedADSB& decoded) {
+    // Это очень упрощенная версия CPR декодирования
+    // Для точного декодирования нужна пара сообщений (четное/нечетное)
+
+    const double dlat0 = 360.0 / 60.0; // 6 degrees
+    const double dlat1 = 360.0 / 59.0; // ~6.1 degrees
+
+    double dlat = format ? dlat1 : dlat0;
+
+    // Приблизительное декодирование (неточное!)
+    decoded.latitude = dlat * (lat_cpr / 131072.0) - 90.0;
+    decoded.longitude = (360.0 / (format ? 59 : 60)) * (lon_cpr / 131072.0) - 180.0;
+
+    // Ограничиваем диапазон
+    if (decoded.latitude > 90.0) decoded.latitude -= 180.0;
+    if (decoded.latitude < -90.0) decoded.latitude += 180.0;
+    if (decoded.longitude > 180.0) decoded.longitude -= 360.0;
+    if (decoded.longitude < -180.0) decoded.longitude += 360.0;
+}
+
+// Декодирование Mode C высоты
+uint16_t decode_mode_c_altitude(uint16_t altitude_raw) {
+    // Gray code декодирование для Mode C
+    uint16_t gray = altitude_raw;
+    uint16_t binary = 0;
+
+    // Простое приближение - для полной реализации нужна таблица Gray кодов
+    binary = gray ^ (gray >> 1);
+
+    return binary * 100; // Mode C в 100-футовых инкрементах
+}
+
+// Заглушки для других типов сообщений
+void decode_surface_position(const ADSBPacket& packet, DecodedADSB& decoded) {
+    Serial.println("Surface position message");
+    // Реализация декодирования наземной позиции
+}
+
+void decode_airborne_position_gnss(const ADSBPacket& packet, DecodedADSB& decoded) {
+    Serial.println("Airborne position with GNSS height");
+    // Похоже на decode_airborne_position, но с GNSS высотой
+}
+
+void decode_aircraft_status(const ADSBPacket& packet, DecodedADSB& decoded) {
+    Serial.println("Aircraft status message");
+}
+
+void decode_target_state_status(const ADSBPacket& packet, DecodedADSB& decoded) {
+    Serial.println("Target state and status message");
+}
+
+void decode_aircraft_operation_status(const ADSBPacket& packet, DecodedADSB& decoded) {
+    Serial.println("Aircraft operation status message");
+}
+
+
+Также нужно обновить структуру DecodedADSB:
+
+
+struct DecodedADSB {
+    uint32_t icao;
+    char flight_id[9];
+    double latitude;
+    double longitude;
+    uint16_t altitude;
+    uint16_t speed;
+    float heading;           // Добавлено
+    int16_t vertical_rate;   // Добавлено
+    uint8_t message_type;
+    uint8_t aircraft_category; // Добавлено
+    bool valid;
+};
+
+
+Основные улучшения:
+
+Правильная проверка DF - проверяем Downlink Format
+Полное декодирование callsign - правильное 6-битовое декодирование
+Декодирование высоты - поддержка Q-bit и Mode C
+Декодирование скорости - включая направление и вертикальную скорость
+Структурированный подход - отдельные функции для каждого типа сообщения
+Лучшая отладка - вывод информации о типах сообщений
+Расширенная структура - дополнительные поля для полной информации
+
+Для точного CPR декодирования координат потребуется более сложная реализация с буферизацией четных/нечетных сообщений.

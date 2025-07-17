@@ -1,0 +1,237 @@
+Вы абсолютно правы! В моей "исправленной" версии я допустил ошибку - объявил параметры неправильно. Вот правильная версия:
+
+
+// Правильно исправленная функция packet_queue_pop
+bool packet_queue_pop(PacketQueue queue, ADSBPacket packet) {
+    if (queue->count == 0) {
+        return false; // Очередь пустая
+    }
+
+    noInterrupts();
+
+    *packet = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return true;
+}
+
+// Правильно исправленная функция decoded_queue_pop
+bool decoded_queue_pop(DecodedQueue queue, DecodedADSB decoded) {
+    if (queue->count == 0) {
+        return false;
+    }
+
+    noInterrupts();
+
+    *decoded = queue->packets[queue->head];
+    queue->head = (queue->head + 1) % MAX_DECODED_QUEUE_SIZE;
+    queue->count--;
+
+    interrupts();
+    return true;
+}
+
+// Все остальные функции работы с очередями (для полноты)
+bool packet_queue_push(PacketQueue* queue, const ADSBPacket& packet) {
+    noInterrupts();
+
+    if (queue->count >= MAX_QUEUE_SIZE) {
+        // Очередь переполнена - удаляем старый пакет
+        queue->head = (queue->head + 1) % MAX_QUEUE_SIZE;
+        queue->count--;
+        Serial.println("Packet queue overflow - removed old packet");
+    }
+
+    queue->packets[queue->tail] = packet;
+    queue->tail = (queue->tail + 1) % MAX_QUEUE_SIZE;
+    queue->count++;
+
+    interrupts();
+    return true;
+}
+
+bool decoded_queue_push(DecodedQueue* queue, const DecodedADSB& decoded) {
+    noInterrupts();
+
+    if (queue->count >= MAX_DECODED_QUEUE_SIZE) {
+        // Очередь переполнена - удаляем старый элемент
+        queue->head = (queue->head + 1) % MAX_DECODED_QUEUE_SIZE;
+        queue->count--;
+    }
+
+    queue->packets[queue->tail] = decoded;
+    queue->tail = (queue->tail + 1) % MAX_DECODED_QUEUE_SIZE;
+    queue->count++;
+
+    interrupts();
+    return true;
+}
+
+bool packet_queue_empty(PacketQueue* queue) {
+    return queue->count == 0;
+}
+
+int packet_queue_size(PacketQueue* queue) {
+    return queue->count;
+}
+
+bool decoded_queue_empty(DecodedQueue* queue) {
+    return queue->count == 0;
+}
+
+int decoded_queue_size(DecodedQueue* queue) {
+    return queue->count;
+}
+
+// Теперь все вызовы функций будут работать корректно:
+void process_received_packets() {
+    ADSBPacket packet;
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    // Правильный вызов с указателями
+    while (packets_processed < max_packets_per_call &&
+           packet_queue_pop(&received_packets, &packet)) {
+
+        packets_processed++;
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                // Отправка в UART2
+                send_decoded_packet_uart(decoded, packet);
+
+                // Правильное добавление в очередь декодированных пакетов
+                decoded_queue_push(&decoded_packets, decoded);
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.println(" packets");
+    }
+}
+
+// Функция обработки декодированных пакетов
+void process_decoded_packets() {
+    DecodedADSB decoded;
+    int processed_count = 0;
+    const int max_decoded_per_call = 3;
+
+    // Правильный вызов с указателями
+    while (processed_count < max_decoded_per_call &&
+           decoded_queue_pop(&decoded_packets, &decoded)) {
+
+        processed_count++;
+
+        // Дополнительная обработка декодированных данных
+        Serial2.print("Decoded ICAO: 0x");
+        Serial2.print(decoded.icao, HEX);
+        if (strlen(decoded.flight_id) > 0) {
+            Serial2.print(", Flight: ");
+            Serial2.print(decoded.flight_id);
+        }
+        Serial2.println();
+    }
+
+    if (processed_count > 0) {
+        Serial.print("Processed ");
+        Serial.print(processed_count);
+        Serial.println(" decoded packets");
+    }
+}
+
+// Функция для добавления пакета в очередь (с проверками)
+bool add_received_packet(const ADSBPacket& packet) {
+    if (packet_queue_size(&received_packets) >= MAX_QUEUE_SIZE - 1) {
+        Serial.println("Warning: Packet queue nearly full");
+    }
+
+    return packet_queue_push(&received_packets, packet);
+}
+
+// Функция для добавления декодированного пакета
+bool add_decoded_packet(const DecodedADSB& decoded) {
+    if (decoded_queue_size(&decoded_packets) >= MAX_DECODED_QUEUE_SIZE - 1) {
+        Serial.println("Warning: Decoded queue nearly full");
+    }
+
+    return decoded_queue_push(&decoded_packets, decoded);
+}
+
+// Статистика очередей (исправленная)
+void print_queue_statistics() {
+    static uint32_t last_stats_time = 0;
+    uint32_t current_time = millis();
+
+    if (current_time - last_stats_time > 5000) { // Каждые 5 секунд
+        Serial.print("Queue sizes - Received: ");
+        Serial.print(packet_queue_size(&received_packets));
+        Serial.print("/");
+        Serial.print(MAX_QUEUE_SIZE);
+        Serial.print(", Decoded: ");
+        Serial.print(decoded_queue_size(&decoded_packets));
+        Serial.print("/");
+        Serial.println(MAX_DECODED_QUEUE_SIZE);
+
+        last_stats_time = current_time;
+    }
+}
+
+// Очистка очередей (исправленная)
+void clear_packet_queues() {
+    noInterrupts();
+
+    received_packets.head = 0;
+    received_packets.tail = 0;
+    received_packets.count = 0;
+
+    decoded_packets.head = 0;
+    decoded_packets.tail = 0;
+    decoded_packets.count = 0;
+
+    interrupts();
+
+    Serial.println("Packet queues cleared");
+}
+
+// Проверка состояния очередей
+void check_queue_health() {
+    static uint32_t last_check = 0;
+    uint32_t current_time = millis();
+
+    if (current_time - last_check > 10000) { // Каждые 10 секунд
+        int received_size = packet_queue_size(&received_packets);
+        int decoded_size = decoded_queue_size(&decoded_packets);
+
+        if (received_size > MAX_QUEUE_SIZE * 0.8) {
+            Serial.println("Warning: Received packet queue nearly full");
+        }
+
+        if (decoded_size > MAX_DECODED_QUEUE_SIZE * 0.8) {
+            Serial.println("Warning: Decoded packet queue nearly full");
+        }
+
+        if (received_size == 0 && decoded_size == 0) {
+            Serial.println("Info: No packets in queues");
+        }
+
+        last_check = current_time;
+    }
+}
+
+
+Основные исправления:
+
+Правильные сигнатуры функций: PacketQueue и ADSBPacket (указатели!)
+Корректное разыменование: packet и decoded
+Согласованность типов: все функции теперь работают с указателями
+Добавлены функции-обертки для безопасной работы с очередями
+Улучшена диагностика состояния очередей
+
+Теперь код будет корректно компилироваться и работать без ошибок типов.

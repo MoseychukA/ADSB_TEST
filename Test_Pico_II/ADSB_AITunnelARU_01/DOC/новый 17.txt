@@ -1,0 +1,281 @@
+Вы правы! Ошибка в том, что received_packets теперь не указатель. Вот исправленная версия:
+
+
+// Исправленная версия обработки пакетов
+void process_received_packets() {
+    ADSBPacket packet;
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    // Исправлено: убран & перед received_packets, так как это уже объект
+    while (packets_processed < max_packets_per_call &&
+           packet_queue_pop(&received_packets, &packet)) {
+
+        packets_processed++;
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                // Отправка в UART2
+                send_decoded_packet_uart(decoded, packet);
+
+                // Добавляем в очередь декодированных пакетов
+                decoded_queue_push(&decoded_packets, decoded);
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.println(" packets");
+    }
+}
+
+// Альтернативная версия с проверкой на пустоту
+void process_received_packets_safe() {
+    ADSBPacket packet;
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    while (packets_processed < max_packets_per_call) {
+        // Сначала проверяем, есть ли пакеты
+        if (packet_queue_empty(&received_packets)) {
+            break; // Очередь пустая
+        }
+
+        // Пытаемся получить пакет
+        if (!packet_queue_pop(&received_packets, &packet)) {
+            break; // Не удалось получить пакет
+        }
+
+        packets_processed++;
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet);
+                decoded_queue_push(&decoded_packets, &decoded);
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.println(" packets");
+    }
+}
+
+// Версия с дополнительными проверками
+void process_received_packets_robust() {
+    if (packet_queue_empty(&received_packets)) {
+        return; // Нет пакетов для обработки
+    }
+
+    ADSBPacket packet;
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+    int queue_size_start = packet_queue_size(&received_packets);
+
+    Serial.print("Processing queue, size: ");
+    Serial.println(queue_size_start);
+
+    while (packets_processed < max_packets_per_call) {
+        // Безопасное извлечение пакета
+        bool got_packet = packet_queue_pop(&received_packets, &packet);
+
+        if (!got_packet) {
+            Serial.println("No more packets in queue");
+            break;
+        }
+
+        packets_processed++;
+
+        // Валидация пакета
+        if (packet.length < 7 || packet.length > 14) {
+            Serial.print("Invalid packet length: ");
+            Serial.println(packet.length);
+            continue;
+        }
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet);
+
+                // Безопасное добавление в очередь декодированных
+                if (!decoded_queue_push(&decoded_packets, &decoded)) {
+                    Serial.println("Failed to add to decoded queue");
+                }
+            } else {
+                Serial.println("Failed to decode valid CRC packet");
+            }
+        } else {
+            Serial.println("Packet with invalid CRC skipped");
+        }
+    }
+
+    int queue_size_end = packet_queue_size(&received_packets);
+
+    Serial.print("Processed ");
+    Serial.print(packets_processed);
+    Serial.print(" packets, remaining: ");
+    Serial.println(queue_size_end);
+}
+
+// Версия с обработкой ошибок CRC
+void process_received_packets_with_correction() {
+    ADSBPacket packet;
+    int packets_processed = 0;
+    int corrected_packets = 0;
+    const int max_packets_per_call = 3; // Меньше для более тщательной обработки
+
+    while (packets_processed < max_packets_per_call &&
+           packet_queue_pop(&received_packets, &packet)) {
+
+        packets_processed++;
+
+        // Сначала проверяем CRC
+        if (!packet.valid_crc) {
+            // Попытка коррекции ошибки
+            uint8_t backup_data[ADSB_LONG_PACKET_BYTES];
+            memcpy(backup_data, packet.data, packet.length);
+
+            if (correct_single_bit_error(packet.data, packet.length)) {
+                packet.valid_crc = true;
+                packet.error_corrected = true;
+                corrected_packets++;
+                Serial.println("Single bit error corrected!");
+            } else {
+                // Восстанавливаем исходные данные
+                memcpy(packet.data, backup_data, packet.length);
+                Serial.println("Packet CRC failed, cannot correct");
+                continue; // Пропускаем этот пакет
+            }
+        }
+
+        // Обрабатываем только валидные пакеты
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet);
+                decoded_queue_push(&decoded_packets, &decoded);
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.print(" packets");
+        if (corrected_packets > 0) {
+            Serial.print(", corrected ");
+            Serial.print(corrected_packets);
+        }
+        Serial.println();
+    }
+}
+
+// Функция для пакетной обработки с оптимизацией
+void process_packets_batch_optimized() {
+    const int batch_size = 10;
+    ADSBPacket packet_batch[batch_size];
+    int packets_in_batch = 0;
+
+    // Собираем пакеты в батч
+    while (packets_in_batch < batch_size &&
+           packet_queue_pop(&received_packets, &packet_batch[packets_in_batch])) {
+        packets_in_batch++;
+    }
+
+    if (packets_in_batch == 0) {
+        return; // Нет пакетов для обработки
+    }
+
+    Serial.print("Processing batch of ");
+    Serial.print(packets_in_batch);
+    Serial.println(" packets");
+
+    // Обрабатываем весь батч
+    for (int i = 0; i < packets_in_batch; i++) {
+        ADSBPacket& packet = packet_batch[i];
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet);
+                decoded_queue_push(&decoded_packets, &decoded);
+            }
+        }
+    }
+}
+
+// Статистическая обработка
+void process_packets_with_stats() {
+    static uint32_t total_processed = 0;
+    static uint32_t total_valid = 0;
+    static uint32_t total_corrected = 0;
+    static uint32_t last_stats_time = 0;
+
+    ADSBPacket packet;
+    int packets_this_call = 0;
+
+    while (packets_this_call < 5 && packet_queue_pop(&received_packets, &packet)) {
+        packets_this_call++;
+        total_processed++;
+
+        if (packet.valid_crc) {
+            total_valid++;
+
+            if (packet.error_corrected) {
+                total_corrected++;
+            }
+
+            DecodedADSB decoded = decode_adsb_packet(packet);
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet);
+                decoded_queue_push(&decoded_packets, &decoded);
+            }
+        }
+    }
+
+    // Статистика каждые 10 секунд
+    uint32_t current_time = millis();
+    if (current_time - last_stats_time > 10000) {
+        Serial.println("=== Packet Processing Statistics ===");
+        Serial.print("Total processed: ");
+        Serial.println(total_processed);
+        Serial.print("Valid packets: ");
+        Serial.print(total_valid);
+        Serial.print(" (");
+        Serial.print((total_valid * 100) / max(total_processed, 1));
+        Serial.println("%)");
+        Serial.print("Corrected packets: ");
+        Serial.print(total_corrected);
+        Serial.print(" (");
+        Serial.print((total_corrected * 100) / max(total_valid, 1));
+        Serial.println("% of valid)");
+        Serial.println("===================================");
+
+        last_stats_time = current_time;
+    }
+}
+
+
+Основные исправления:
+
+Убрал лишний & перед received_packets
+Добавил безопасные проверки перед извлечением пакетов
+Улучшенная обработка ошибок CRC и коррекция
+Пакетная обработка для повышения эффективности
+Статистика обработки для мониторинга
+Валидация данных перед обработкой
+Робастная обработка с множественными проверками
+
+Теперь код корректно работает с определенной ранее структурой PacketQueue.
