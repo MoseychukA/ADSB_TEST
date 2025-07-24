@@ -1,0 +1,95 @@
+Этот код декодирует номер рейса (callsign) из ADS-B сообщений. Вот анализ функции:
+
+Описание работы
+
+Функция извлекает 8-символьный callsign из байтов 5-10 ADS-B сообщения типа 1-4 (Identification messages).
+
+Основные элементы
+
+Charset для декодирования
+
+const char charset[] = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ#####_###############0123456789######";
+
+Используется 6-битное кодирование (64 символа)
+_ представляет пробел
+# - недопустимые символы
+
+Извлечение 6-битных кодов
+Каждый символ кодируется 6 битами, поэтому код извлекает биты с использованием битовых операций:
+
+
+case 0: char_code = (data[5] >> 2) & 0x3F; break;           // Биты 7-2 из data[5]
+case 1: char_code = ((data[5] & 0x03) << 4) | (data[6] >> 4); break; // 2 бита + 4 бита
+case 2: char_code = ((data[6] & 0x0F) << 2) | (data[7] >> 6); break; // 4 бита + 2 бита
+// и т.д.
+
+
+Возможные улучшения
+
+Проверка валидности указателей
+
+void PacketDecoder::decode_callsign(uint8_t data, char callsign)
+{
+    if (!data || !callsign) {
+        if (callsign) strcpy(callsign, "N/A");
+        return;
+    }
+    // остальной код...
+}
+
+
+Использование constexpr для charset
+
+static constexpr const char charset[] =
+    "#ABCDEFGHIJKLMNOPQRSTUVWXYZ#####_###############0123456789######";
+
+
+Функция для извлечения битов
+
+private:
+    static uint8_t extract_6bits(const uint8_t* data, int bit_offset) {
+        int byte_idx = bit_offset / 8;
+        int bit_idx = bit_offset % 8;
+
+        if (bit_idx <= 2) {
+            return (data[byte_idx] >> (2 - bit_idx)) & 0x3F;
+        } else {
+            return ((data[byte_idx] << (bit_idx - 2)) |
+                   (data[byte_idx + 1] >> (10 - bit_idx))) & 0x3F;
+        }
+    }
+
+
+Упрощенная версия с циклом
+
+void PacketDecoder::decode_callsign(uint8_t data, char callsign)
+{
+    if (!data || !callsign) {
+        if (callsign) strcpy(callsign, "N/A");
+        return;
+    }
+
+    uint8_t msg_type = decode_message_type(data);
+
+    if (msg_type >= 1 && msg_type <= 4) {
+        static constexpr const char charset[] =
+            "#ABCDEFGHIJKLMNOPQRSTUVWXYZ#####_###############0123456789######";
+
+        // Извлекаем 8 символов по 6 бит каждый, начиная с бита 40
+        for (int i = 0; i < 8; i++) {
+            uint8_t char_code = extract_6bits(data, 40 + i * 6);
+            callsign[i] = charset[char_code];
+        }
+        callsign[8] = '\0';
+
+        // Удаляем trailing пробелы
+        for (int i = 7; i >= 0 && callsign[i] == '_'; i--) {
+            callsign[i] = '\0';
+        }
+    } else {
+        strcpy(callsign, "N/A");
+    }
+}
+
+
+Код корректно реализует стандарт ADS-B для декодирования callsign и работает согласно спецификации.

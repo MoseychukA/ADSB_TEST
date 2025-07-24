@@ -61,7 +61,7 @@ bool PacketDecoder::UpdateDecoderLoop()
             .message = "",
             .log_level = SettingsManager::LogLevel::kInfo,
         };
-        if (/*decoded_packet.GetDownlinkFormat()== 17 */  decoded_packet.IsValid())  // Когда выставлен флаг?
+        if (decoded_packet.IsValid())  // Когда выставлен флаг?
         {
             decoded_1090_packet_out_queue.Push(decoded_packet);  // 
 

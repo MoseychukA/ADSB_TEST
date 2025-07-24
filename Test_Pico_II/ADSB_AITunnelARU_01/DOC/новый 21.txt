@@ -1,0 +1,221 @@
+Вот несколько способов преобразования строки 8D1521F48D1521F47FF3600FFFFFFF91 в HEX массив:
+
+Способ 1: Статический массив (если строка известна заранее)
+
+
+// Прямое определение массива
+uint8_t hex_data[] = {
+    0x8D, 0x15, 0x21, 0xF4, 0x8D, 0x15, 0x21, 0xF4,
+    0x7F, 0xF3, 0x60, 0x0F, 0xFF, 0xFF, 0xFF, 0x91
+};
+
+// Размер массива
+const int hex_data_size = sizeof(hex_data);
+
+
+Способ 2: Функция преобразования строки в массив
+
+
+// Функция для преобразования HEX строки в массив байт
+int hexStringToByteArray(const char hex_string, uint8_t byte_array, int max_length) {
+    int string_length = strlen(hex_string);
+
+    // Проверяем четность длины строки
+    if (string_length % 2 != 0) {
+        Serial.println("Error: HEX string length must be even");
+        return -1;
+    }
+
+    int byte_count = string_length / 2;
+
+    // Проверяем размер выходного массива
+    if (byte_count > max_length) {
+        Serial.println("Error: Output array too small");
+        return -1;
+    }
+
+    // Преобразуем каждые 2 символа в байт
+    for (int i = 0; i < byte_count; i++) {
+        char hex_pair[3] = {hex_string[i2], hex_string[i2+1], '\0'};
+        byte_array[i] = (uint8_t)strtol(hex_pair, NULL, 16);
+    }
+
+    return byte_count;
+}
+
+// Пример использования
+void convertHexString() {
+    const char* hex_string = "8D1521F48D1521F47FF3600FFFFFFF91";
+    uint8_t hex_data[32];  // Достаточно большой массив
+
+    int bytes_converted = hexStringToByteArray(hex_string, hex_data, 32);
+
+    if (bytes_converted > 0) {
+        Serial.print("Converted ");
+        Serial.print(bytes_converted);
+        Serial.println(" bytes:");
+
+        for (int i = 0; i < bytes_converted; i++) {
+            if (hex_data[i] < 16) Serial.print("0");
+            Serial.print(hex_data[i], HEX);
+            Serial.print(" ");
+        }
+        Serial.println();
+    }
+}
+
+
+Способ 3: Оптимизированная функция с проверкой символов
+
+
+// Функция для преобразования HEX символа в число
+uint8_t hexCharToValue(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    } else if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    } else if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    return 0xFF;  // Ошибка
+}
+
+// Улучшенная функция преобразования
+int hexStringToBytes(const char hex_string, uint8_t output, int max_output_size) {
+    int len = strlen(hex_string);
+
+    if (len % 2 != 0 || len / 2 > max_output_size) {
+        return -1;  // Ошибка
+    }
+
+    int byte_count = 0;
+
+    for (int i = 0; i < len; i += 2) {
+        uint8_t high = hexCharToValue(hex_string[i]);
+        uint8_t low = hexCharToValue(hex_string[i + 1]);
+
+        if (high == 0xFF || low == 0xFF) {
+            return -1;  // Недопустимый символ
+        }
+
+        output[byte_count] = (high << 4) | low;
+        byte_count++;
+    }
+
+    return byte_count;
+}
+
+
+Способ 4: Использование в структуре ADS-B пакета
+
+
+// Функция для создания тестового пакета ADS-B
+ADSBPacket createTestPacket() {
+    ADSBPacket packet;
+    const char* test_hex = "8D1521F48D1521F47FF3600FFFFFFF91";
+
+    packet.length = hexStringToBytes(test_hex, packet.data, 16);
+    packet.timestamp = micros();
+    packet.channel = 1;
+
+    return packet;
+}
+
+// Функция для загрузки данных из строки
+bool loadPacketFromHexString(const char hex_string, ADSBPacket packet) {
+    int bytes = hexStringToBytes(hex_string, packet->data, 16);
+
+    if (bytes > 0) {
+        packet->length = bytes;
+        packet->timestamp = micros();
+        packet->channel = 0;  // Тестовый канал
+        return true;
+    }
+
+    return false;
+}
+
+
+Способ 5: Прямая инициализация в setup()
+
+
+void setup() {
+    Serial.begin(115200);
+
+    // Ваша искомая строка
+    const char* hex_string = "8D1521F48D1521F47FF3600FFFFFFF91";
+    uint8_t packet_data[16];
+
+    // Преобразуем в массив
+    int packet_length = hexStringToBytes(hex_string, packet_data, 16);
+
+    Serial.println("Original HEX string: " + String(hex_string));
+    Serial.print("Converted to array: ");
+
+    for (int i = 0; i < packet_length; i++) {
+        Serial.print("0x");
+        if (packet_data[i] < 16) Serial.print("0");
+        Serial.print(packet_data[i], HEX);
+        if (i < packet_length - 1) Serial.print(", ");
+    }
+    Serial.println();
+
+    // Тестируем декодирование ADS-B
+    testADSBDecoding(packet_data, packet_length);
+}
+
+// Функция для тестирования декодирования
+void testADSBDecoding(uint8_t* data, int length) {
+    Serial.println("\n--- ADS-B Packet Analysis ---");
+
+    // Декодируем ICAO
+    uint32_t icao = decode_icao(data);
+    Serial.print("ICAO: ");
+    Serial.println(icao, HEX);
+
+    // Декодируем тип сообщения
+    uint8_t msg_type = decode_message_type(data);
+    Serial.print("Message Type: ");
+    Serial.println(msg_type);
+
+    // Проверяем CRC
+    bool crc_valid = check_crc(data, length);
+    Serial.print("CRC Valid: ");
+    Serial.println(crc_valid ? "YES" : "NO");
+
+    // Пытаемся декодировать другие поля в зависимости от типа
+    if (msg_type >= 1 && msg_type <= 4) {
+        char callsign[9];
+        decode_callsign(data, callsign);
+        Serial.print("Callsign: ");
+        Serial.println(callsign);
+    }
+
+    if (msg_type >= 9 && msg_type <= 22) {
+        double lat, lon;
+        decode_position(data, &lat, &lon);
+        Serial.print("Position: ");
+        Serial.print(lat, 6);
+        Serial.print(", ");
+        Serial.println(lon, 6);
+
+        uint16_t altitude = decode_altitude(data);
+        Serial.print("Altitude: ");
+        Serial.print(altitude);
+        Serial.println(" ft");
+    }
+}
+
+
+Результат преобразования:
+
+Строка 8D1521F48D1521F47FF3600FFFFFFF91 преобразуется в массив:
+
+
+uint8_t hex_data[16] = {
+    0x8D, 0x15, 0x21, 0xF4, 0x8D, 0x15, 0x21, 0xF4,
+    0x7F, 0xF3, 0x60, 0x0F, 0xFF, 0xFF, 0xFF, 0x91
+};
+
+
+Этот массив содержит 16 байт (128 бит), что соответствует расширенному ADS-B сообщению. Рекомендую использовать функцию hexStringToBytes() для динамического преобразования или статический массив для тестирования.

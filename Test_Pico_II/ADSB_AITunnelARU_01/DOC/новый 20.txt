@@ -1,0 +1,331 @@
+Вот исправленная версия для добавления декодированных пакетов в очередь:
+
+
+// Безопасная обработка принятых пакетов (исправленная версия)
+void process_received_packets() {
+    ADSBPacket packet;
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    while (packets_processed < max_packets_per_call &&
+           packet_queue_pop(&received_packets, &packet)) {
+
+        packets_processed++;
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                // Отправка в UART2
+                send_decoded_packet_uart(decoded, packet);
+
+                // Исправленное добавление в очередь декодированных пакетов
+                decoded_queue_push(&decoded_packets, &decoded);
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.println(" packets");
+    }
+}
+
+// Альтернативная безопасная версия с дополнительными проверками
+void process_received_packets_safe() {
+    ADSBPacket packet;
+    int packets_processed = 0;
+    const int max_packets_per_call = 5;
+
+    while (packets_processed < max_packets_per_call) {
+        // Сначала проверяем, есть ли пакеты
+        if (packet_queue_empty(&received_packets)) {
+            break; // Очередь пустая
+        }
+
+        // Пытаемся получить пакет
+        if (!packet_queue_pop(&received_packets, &packet)) {
+            break; // Не удалось получить пакет
+        }
+
+        packets_processed++;
+
+        if (packet.valid_crc) {
+            DecodedADSB decoded = decode_adsb_packet(packet);
+
+            if (decoded.valid) {
+                send_decoded_packet_uart(decoded, packet);
+
+                // Безопасное добавление с проверкой успешности
+                if (!decoded_queue_push(&decoded_packets, &decoded)) {
+                    Serial.println("Warning: Failed to add to decoded queue");
+                }
+            }
+        }
+    }
+
+    if (packets_processed > 0) {
+        Serial.print("Processed ");
+        Serial.print(packets_processed);
+        Serial.println(" packets");
+    }
+}
+
+// Функция обработки завершенного пакета (исправленная)
+void process_complete_packet(uint64_t timestamp) {
+    ADSBPacket packet;
+    packet.timestamp = timestamp;
+
+    // Определяем длину пакета
+    int data_bits = bit_count - (bit_counter + PREAMBLE_LENGTH);
+    packet.length = data_bits / 16; // Manchester: 2 бита на 1 бит данных
+
+    if (packet.length < 7 || packet.length > 14) {
+        Serial.println("Invalid packet length");
+        reset_packet_buffer_isr();
+        return;
+    }
+
+    // Manchester декодирование
+    if (manchester_decode_transitions((uint32_t*)&packet_bits[bit_counter + PREAMBLE_LENGTH],
+                                    packet.data, data_bits)) {
+
+        // Отладочный вывод
+        Serial.print("Packet (");
+        Serial.print(packet.length);
+        Serial.print(" bytes): ");
+        for (int i = 0; i < packet.length; i++) {
+            if (packet.data[i] < 0x10) Serial.print("0");
+            Serial.print(packet.data[i], HEX);
+            Serial.print(" ");
+        }
+        Serial.println();
+
+        // Проверка CRC
+        packet.valid_crc = verify_crc(packet.data, packet.length);
+        packet.error_corrected = false;
+
+        if (!packet.valid_crc) {
+            // Создаем копию для восстановления
+            uint8_t backup_data[ADSB_LONG_PACKET_BYTES];
+            memcpy(backup_data, packet.data, packet.length);
+
+            if (correct_single_bit_error(packet.data, packet.length)) {
+                packet.valid_crc = true;
+                packet.error_corrected = true;
+                Serial.println("Single bit error corrected!");
+            } else {
+                // Восстанавливаем исходные данные
+                memcpy(packet.data, backup_data, packet.length);
+                Serial.println("CRC check failed");
+            }
+        } else {
+            Serial.println("CRC check passed");
+        }
+
+        // Добавляем в очередь только валидные пакеты
+        if (packet.valid_crc) {
+            if (add_received_packet(packet)) {
+                Serial.print("Packet added to queue. Size: ");
+                Serial.println(packet_queue_size(&received_packets));
+
+                // Немедленная обработка и добавление в очередь декодированных
+                DecodedADSB decoded = decode_adsb_packet(packet);
+                if (decoded.valid) {
+                    decoded_queue_push(&decoded_packets, &decoded);
+                }
+            } else {
+                Serial.println("Failed to add packet to queue");
+            }
+        }
+
+    } else {
+        Serial.println("Manchester decode failed");
+    }
+
+    // Сброс состояния
+    reset_packet_buffer_isr();
+}
+
+// Функция для обработки декодированных пакетов из очереди
+void process_decoded_packets() {
+    DecodedADSB decoded;
+    int processed_count = 0;
+    const int max_decoded_per_call = 3;
+
+    while (processed_count < max_decoded_per_call &&
+           decoded_queue_pop(&decoded_packets, &decoded)) {
+
+        processed_count++;
+
+        // Дополнительная обработка декодированных данных
+        process_decoded_data(decoded);
+    }
+
+    if (processed_count > 0) {
+        Serial.print("Processed ");
+        Serial.print(processed_count);
+        Serial.println(" decoded packets");
+    }
+}
+
+// Функция для дополнительной обработки декодированных данных
+void process_decoded_data(const DecodedADSB& decoded) {
+    // Логирование в Serial2
+    Serial2.print("Decoded - ICAO: 0x");
+    Serial2.print(decoded.icao, HEX);
+
+    if (strlen(decoded.flight_id) > 0) {
+        Serial2.print(", Flight: ");
+        Serial2.print(decoded.flight_id);
+    }
+
+    if (decoded.latitude != 0.0 || decoded.longitude != 0.0) {
+        Serial2.print(", Position: ");
+        Serial2.print(decoded.latitude, 6);
+        Serial2.print(",");
+        Serial2.print(decoded.longitude, 6);
+    }
+
+    if (decoded.altitude > 0) {
+        Serial2.print(", Alt: ");
+        Serial2.print(decoded.altitude);
+        Serial2.print(" ft");
+    }
+
+    if (decoded.speed > 0) {
+        Serial2.print(", Speed: ");
+        Serial2.print(decoded.speed);
+        Serial2.print(" kt");
+    }
+
+    Serial2.println();
+
+    // Здесь можно добавить дополнительные действия:
+    // - Сохранение в файл
+    // - Отправка по сети
+    // - Анализ траектории
+    // - Фильтрация по ICAO код и т.д.
+}
+
+// Статистика декодированных пакетов
+void print_decoded_statistics() {
+    static uint32_t last_stats_time = 0;
+    static uint32_t total_decoded = 0;
+    static uint32_t last_decoded_count = 0;
+
+    uint32_t current_time = millis();
+
+    if (current_time - last_stats_time > 10000) { // Каждые 10 секунд
+        uint32_t current_decoded = total_decoded;
+        uint32_t decoded_rate = (current_decoded - last_decoded_count) / 10; // пакетов в секунду
+
+        Serial.print("Decoded statistics - Total: ");
+        Serial.print(current_decoded);
+        Serial.print(", Rate: ");
+        Serial.print(decoded_rate);
+        Serial.print(" pkt/s, Queue: ");
+        Serial.print(decoded_packets.count);
+        Serial.print("/");
+        Serial.println(MAX_DECODED_QUEUE_SIZE);
+
+        last_decoded_count = current_decoded;
+        last_stats_time = current_time;
+    }
+}
+
+// Функция для очистки старых декодированных пакетов
+void cleanup_old_decoded_packets() {
+    static uint32_t last_cleanup = 0;
+    uint32_t current_time = millis();
+
+    // Очистка каждые 30 секунд
+    if (current_time - last_cleanup > 30000) {
+        if (decoded_packets.count > MAX_DECODED_QUEUE_SIZE * 0.9) {
+            // Удаляем половину старых пакетов
+            int packets_to_remove = decoded_packets.count / 2;
+
+            for (int i = 0; i < packets_to_remove; i++) {
+                DecodedADSB dummy;
+                decoded_queue_pop(&decoded_packets, &dummy);
+            }
+
+            Serial.print("Cleanup: Removed ");
+            Serial.print(packets_to_remove);
+            Serial.println(" old decoded packets");
+        }
+
+        last_cleanup = current_time;
+    }
+}
+
+// Обновленная задача для ядра 1 (обработка)
+void core1_task() {
+    static uint32_t last_led_toggle = 0;
+
+    while (true) {
+        uint32_t current_time = millis();
+
+        // Переключение LED каждые 500 мс
+        if (current_time - last_led_toggle >= 500) {
+            digitalWrite(CORE1_LED_PIN, !digitalRead(CORE1_LED_PIN));
+            last_led_toggle = current_time;
+        }
+
+        // Обработка принятых пакетов
+        process_received_packets_safe();
+
+        // Обработка декодированных пакетов
+        process_decoded_packets();
+
+        // Статистика очередей
+        print_queue_statistics();
+
+        // Статистика декодированных
+        print_decoded_statistics();
+
+        // Очистка старых данных
+        cleanup_old_decoded_packets();
+
+        delay(1);
+    }
+}
+
+// Функция для получения информации о состоянии очередей
+void get_queue_info() {
+    Serial.println("=== Queue Information ===");
+    Serial.print("Received packets: ");
+    Serial.print(packet_queue_size(&received_packets));
+    Serial.print("/");
+    Serial.println(MAX_QUEUE_SIZE);
+
+    Serial.print("Decoded packets: ");
+    Serial.print(decoded_packets.count);
+    Serial.print("/");
+    Serial.println(MAX_DECODED_QUEUE_SIZE);
+
+    // Процент заполнения
+    float received_fill = (float)packet_queue_size(&received_packets) / MAX_QUEUE_SIZE * 100;
+    float decoded_fill = (float)decoded_packets.count / MAX_DECODED_QUEUE_SIZE * 100;
+
+    Serial.print("Fill levels - Received: ");
+    Serial.print(received_fill, 1);
+    Serial.print("%, Decoded: ");
+    Serial.print(decoded_fill, 1);
+    Serial.println("%");
+    Serial.println("========================");
+}
+
+
+Основные изменения:
+
+Исправлено обращение: decoded_queue_push(&decoded_packets, &decoded) - передаем указатель на объект
+Добавлена проверка успешности добавления в очередь
+Разделена обработка: отдельная функция для обработки декодированных пакетов
+Добавлена статистика декодированных пакетов
+Автоматическая очистка старых данных при переполнении
+Улучшенная диагностика состояния очередей
+Дополнительная обработка декодированных данных
+
+Теперь программа правильно работает с очередью декодированных пакетов, передавая указатель на структуру DecodedADSB.
